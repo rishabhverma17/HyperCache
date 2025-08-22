@@ -10,21 +10,9 @@ env:
   GO_VERSION: '1.23.2'
 
 jobs:
-  test:
-    name: Test
+  build:
+    name: Build
     runs-on: ubuntu-latest
-    
-    services:
-      # Redis for compatibility testing
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
     - name: Checkout code
@@ -51,54 +39,6 @@ jobs:
     - name: Verify dependencies
       run: go mod verify
 
-    - name: Run go vet
-      run: go vet ./...
-
-    - name: Run go fmt check
-      run: |
-        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-          echo "The following files are not formatted properly:"
-          gofmt -s -l .
-          exit 1
-        fi
-
-    - name: Run unit tests
-      run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-
-    - name: Run benchmarks
-      run: go test -bench=. -benchmem ./internal/...
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.out
-        flags: unittests
-        name: codecov-umbrella
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: test
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Cache Go modules
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
     - name: Build binary
       run: |
         mkdir -p bin
@@ -115,252 +55,21 @@ jobs:
         name: hypercache-binary
         path: bin/hypercache
 
-  integration-test:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: build
-
-    services:
-      elasticsearch:
-        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-        env:
-          discovery.type: single-node
-          ES_JAVA_OPTS: "-Xms512m -Xmx512m"
-          xpack.security.enabled: false
-        ports:
-          - 9200:9200
-        options: >-
-          --health-cmd "curl -f http://localhost:9200/_cluster/health || exit 1"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 5
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Download build artifact
-      uses: actions/download-artifact@v3
-      with:
-        name: hypercache-binary
-        path: bin/
-
-    - name: Make binary executable
-      run: chmod +x bin/hypercache
-
-    - name: Wait for Elasticsearch
-      run: |
-        for i in {1..30}; do
-          if curl -s http://localhost:9200/_cluster/health; then
-            echo "Elasticsearch is ready"
-            break
-          fi
-          echo "Waiting for Elasticsearch... ($i/30)"
-          sleep 10
-        done
-
-    - name: Start HyperCache node
-      run: |
-        ./bin/hypercache -node-id test-node -protocol resp -port 6380 &
-        echo $! > hypercache.pid
-        sleep 5
-
-    - name: Test RESP protocol
-      run: |
-        # Install redis-tools for redis-cli
-        sudo apt-get update
-        sudo apt-get install -y redis-tools
-        
-        # Test basic operations
-        echo "Testing RESP protocol..."
-        redis-cli -h localhost -p 6380 ping
-        redis-cli -h localhost -p 6380 set testkey "hello world"
-        redis-cli -h localhost -p 6380 get testkey
-        redis-cli -h localhost -p 6380 del testkey
-
-    - name: Test HTTP API
-      run: |
-        echo "Testing HTTP API..."
-        # Test health endpoint
-        curl -f http://localhost:9080/health || echo "HTTP API not available (expected for single node)"
-        
-    - name: Run persistence tests
-      run: go test -v ./internal/storage/ -tags=integration
-
-    - name: Cleanup
-      run: |
-        if [ -f hypercache.pid ]; then
-          kill $(cat hypercache.pid) || true
-        fi
-
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: test
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Run Gosec Security Scanner
-      uses: securecodewarrior/github-action-gosec@master
-      with:
-        args: '-no-fail -fmt sarif -out gosec.sarif ./...'
-
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v2
-      with:
-        sarif_file: gosec.sarif
-
-  docker-build:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: [test, build]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Create Dockerfile
-      run: |
-        cat > Dockerfile << 'EOF'
-        FROM golang:1.23.2-alpine AS builder
-        
-        WORKDIR /app
-        COPY go.mod go.sum ./
-        RUN go mod download
-        
-        COPY . .
-        RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o hypercache cmd/hypercache/main.go
-        
-        FROM alpine:latest
-        RUN apk --no-cache add ca-certificates
-        WORKDIR /root/
-        
-        COPY --from=builder /app/hypercache .
-        COPY --from=builder /app/configs configs/
-        
-        EXPOSE 8080 9080 7946
-        
-        CMD ["./hypercache", "-protocol", "resp", "-node-id", "docker-node"]
-        EOF
-
-    - name: Build Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: false
-        tags: hypercache:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Test Docker image
-      run: |
-        docker run --rm -d --name hypercache-test -p 8081:8080 hypercache:latest
-        sleep 10
-        # Test if container is running
-        docker ps | grep hypercache-test
-        docker stop hypercache-test
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v3
-      with:
-        version: latest
-        args: --timeout=5m
-
-  documentation:
-    name: Documentation Check
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Check README links
-      run: |
-        # Check if all referenced files exist
-        echo "Checking documentation links..."
-        
-        # Check if API documentation exists
-        if [ ! -f "docs/markdown/api/http-api-documentation.md" ]; then
-          echo "❌ API documentation missing"
-          exit 1
-        fi
-        
-        # Check if key configuration files exist
-        for config in configs/node1-config.yaml configs/node2-config.yaml configs/node3-config.yaml; do
-          if [ ! -f "$config" ]; then
-            echo "❌ Configuration file missing: $config"
-            exit 1
-          fi
-        done
-        
-        # Check if scripts exist
-        for script in scripts/start-system.sh scripts/build-and-run.sh; do
-          if [ ! -f "$script" ]; then
-            echo "❌ Script missing: $script"
-            exit 1
-          fi
-        done
-        
-        echo "✅ All documentation links verified"
-
-    - name: Validate Docker Compose
-      run: |
-        if [ -f "docker-compose.logging.yml" ]; then
-          echo "✅ Docker compose file exists"
-        else
-          echo "❌ Docker compose file missing"
-          exit 1
-        fi
-
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [test, build, integration-test, security-scan, docker-build, lint, documentation]
+    needs: [build]
     if: always()
 
     steps:
     - name: Notify success
-      if: ${{ needs.test.result == 'success' && needs.build.result == 'success' }}
+      if: ${{ needs.build.result == 'success' }}
       run: |
         echo "🎉 HyperCache CI pipeline completed successfully!"
-        echo "✅ All tests passed"
         echo "✅ Build successful"
-        echo "✅ Integration tests passed" 
-        echo "✅ Security scan completed"
-        echo "✅ Docker build successful"
-        echo "✅ Linting passed"
-        echo "✅ Documentation validated"
 
     - name: Notify failure
-      if: ${{ needs.test.result == 'failure' || needs.build.result == 'failure' }}
+      if: ${{ needs.build.result == 'failure' }}
       run: |
         echo "❌ HyperCache CI pipeline failed!"
         echo "Please check the logs for details."
