@@ -1,0 +1,284 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  GO_VERSION: '1.23.2'
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: HyperCache ${{ github.ref }}
+        body: |
+          ## HyperCache Release ${{ github.ref }}
+          
+          ### Features
+          - Redis-compatible distributed cache
+          - Enterprise persistence with AOF + Snapshots
+          - Real-time monitoring with Grafana + Elasticsearch + Filebeat
+          - Multi-node clustering with gossip protocol
+          - HTTP API and RESP protocol support
+          - Advanced memory management with Cuckoo filters
+          
+          ### Installation
+          ```bash
+          # Download and extract the binary for your platform
+          wget https://github.com/rishabhverma17/HyperCache/releases/download/${{ github.ref }}/hypercache-linux-amd64.tar.gz
+          tar -xzf hypercache-linux-amd64.tar.gz
+          
+          # Start HyperCache
+          ./hypercache -protocol resp -port 8080
+          ```
+          
+          ### Docker
+          ```bash
+          docker run -p 8080:8080 -p 9080:9080 ghcr.io/rishabhverma17/hypercache:${{ github.ref }}
+          ```
+          
+          See the [README](https://github.com/rishabhverma17/HyperCache#readme) for full documentation.
+        draft: false
+        prerelease: false
+
+  build-and-upload:
+    name: Build and Upload Assets
+    runs-on: ubuntu-latest
+    needs: create-release
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Build binary
+      run: |
+        mkdir -p dist
+        
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          BINARY_NAME="hypercache.exe"
+        else
+          BINARY_NAME="hypercache"
+        fi
+        
+        CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          go build -a -installsuffix cgo -ldflags "-s -w" \
+          -o dist/${BINARY_NAME} cmd/hypercache/main.go
+
+    - name: Create archive
+      run: |
+        cd dist
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          ARCHIVE_NAME="hypercache-${{ matrix.goos }}-${{ matrix.goarch }}.zip"
+          zip ${ARCHIVE_NAME} hypercache.exe
+        else
+          ARCHIVE_NAME="hypercache-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          tar -czf ${ARCHIVE_NAME} hypercache
+        fi
+        echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./dist/${{ env.ARCHIVE_NAME }}
+        asset_name: ${{ env.ARCHIVE_NAME }}
+        asset_content_type: application/octet-stream
+
+  docker-release:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: create-release
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository_owner }}/hypercache
+        tags: |
+          type=ref,event=tag
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Create Dockerfile
+      run: |
+        cat > Dockerfile << 'EOF'
+        FROM golang:1.23.2-alpine AS builder
+        
+        WORKDIR /app
+        COPY go.mod go.sum ./
+        RUN go mod download
+        
+        COPY . .
+        RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+            -ldflags "-s -w" -o hypercache cmd/hypercache/main.go
+        
+        FROM alpine:latest
+        RUN apk --no-cache add ca-certificates curl
+        WORKDIR /app
+        
+        COPY --from=builder /app/hypercache .
+        COPY --from=builder /app/configs configs/
+        COPY --from=builder /app/scripts scripts/
+        
+        # Create directories for data and logs
+        RUN mkdir -p data logs
+        
+        # Health check
+        HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+          CMD curl -f http://localhost:9080/health || exit 1
+        
+        EXPOSE 8080 9080 7946
+        
+        CMD ["./hypercache", "-protocol", "resp", "-node-id", "docker-node"]
+        EOF
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  helm-chart:
+    name: Package Helm Chart
+    runs-on: ubuntu-latest
+    needs: create-release
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create Helm Chart
+      run: |
+        mkdir -p helm/hypercache
+        
+        # Create Chart.yaml
+        cat > helm/hypercache/Chart.yaml << EOF
+        apiVersion: v2
+        name: hypercache
+        description: A Helm chart for HyperCache distributed cache
+        type: application
+        version: ${GITHUB_REF#refs/tags/v}
+        appVersion: "${GITHUB_REF#refs/tags/}"
+        home: https://github.com/rishabhverma17/HyperCache
+        sources:
+        - https://github.com/rishabhverma17/HyperCache
+        maintainers:
+        - name: Rishabh Verma
+          email: your-email@example.com
+        EOF
+        
+        # Create basic values.yaml
+        cat > helm/hypercache/values.yaml << 'EOF'
+        replicaCount: 3
+        
+        image:
+          repository: ghcr.io/rishabhverma17/hypercache
+          pullPolicy: IfNotPresent
+          tag: ""
+        
+        service:
+          type: ClusterIP
+          respPort: 8080
+          httpPort: 9080
+          
+        persistence:
+          enabled: true
+          storageClass: ""
+          size: 8Gi
+          
+        monitoring:
+          enabled: false
+        EOF
+        
+        # Create templates directory
+        mkdir -p helm/hypercache/templates
+        
+        # Basic deployment template
+        cat > helm/hypercache/templates/deployment.yaml << 'EOF'
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: {{ include "hypercache.fullname" . }}
+        spec:
+          replicas: {{ .Values.replicaCount }}
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "hypercache.name" . }}
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: {{ include "hypercache.name" . }}
+            spec:
+              containers:
+              - name: hypercache
+                image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+                imagePullPolicy: {{ .Values.image.pullPolicy }}
+                ports:
+                - name: resp
+                  containerPort: {{ .Values.service.respPort }}
+                - name: http
+                  containerPort: {{ .Values.service.httpPort }}
+        EOF
+
+    - name: Package Helm Chart
+      run: |
+        helm package helm/hypercache --destination ./
+        echo "CHART_PACKAGE=$(ls hypercache-*.tgz)" >> $GITHUB_ENV
+
+    - name: Upload Helm Chart
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ env.CHART_PACKAGE }}
+        asset_name: ${{ env.CHART_PACKAGE }}
+        asset_content_type: application/gzip

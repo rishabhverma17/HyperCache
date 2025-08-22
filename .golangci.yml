@@ -1,0 +1,101 @@
+# GolangCI-Lint configuration for HyperCache
+run:
+  timeout: 5m
+  go: '1.23.2'
+  modules-download-mode: readonly
+
+linters-settings:
+  govet:
+    enable-all: true
+  gocyclo:
+    min-complexity: 15
+  goconst:
+    min-len: 2
+    min-occurrences: 3
+  goimports:
+    local-prefixes: github.com/rishabhverma17/HyperCache
+  golint:
+    min-confidence: 0.8
+  misspell:
+    locale: US
+  lll:
+    line-length: 120
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+
+linters:
+  enable:
+    - bodyclose
+    - deadcode
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - exhaustive
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - golint
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - staticcheck
+    - structcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    - whitespace
+
+  disable:
+    - maligned
+    - prealloc
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gomnd
+        - gocritic
+        - funlen
+    
+    # Exclude some linters from running on examples
+    - path: examples/
+      linters:
+        - gomnd
+        - gocritic
+    
+    # Exclude some linters from running on cmd/
+    - path: cmd/
+      linters:
+        - gomnd
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
