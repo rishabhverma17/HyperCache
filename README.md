@@ -385,10 +385,7 @@ Password: admin123
 - **Use Cases**: Membership testing, cache admission policies, duplicate detection
 
 ## 📚 **Documentation**
-
-- **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)**: Complete feature overview
-- **[REMAINING_ITEMS.md](REMAINING_ITEMS.md)**: Future enhancements roadmap  
-- **[examples/resp-demo/README.md](examples/resp-demo/README.md)**: Demo usage guide
+ 
 - **[docs/](docs/)**: Technical deep-dives and architecture docs
 
 ## 💾 **Persistence & Recovery Deep Dive**
