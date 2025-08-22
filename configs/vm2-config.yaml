@@ -1,0 +1,55 @@
+# VM2 Configuration (10.0.1.5)
+node:
+  id: "vm2-node"
+  data_dir: "/opt/hypercache/data"
+
+network:
+  resp_bind_addr: "0.0.0.0"
+  resp_port: 8081             # Different port per VM (optional)
+  http_bind_addr: "0.0.0.0"
+  http_port: 9081             # Different port per VM (optional)
+  advertise_addr: "10.0.1.5"  # VM2's IP address
+  gossip_port: 7946           # Same gossip port across all VMs
+
+cluster:
+  seeds:
+    - "10.0.1.4:7946"
+    - "10.0.1.5:7946"
+    - "10.0.1.6:7946"
+  replication_factor: 3
+  consistency_level: "eventual"
+
+persistence:
+  enabled: true
+  strategy: "hybrid"
+  enable_aof: true
+  sync_policy: "everysec"
+  sync_interval: 1s
+  snapshot_interval: 15m
+  max_log_size: "100MB"
+  compression_level: 6
+  retain_logs: 3
+
+cache:
+  max_memory: "8GB"
+  default_ttl: "1h"
+  cuckoo_filter_fpp: 0.01
+
+storage:
+  wal_sync_interval: 10ms
+  memtable_size: "64MB"
+  compaction_threads: 4
+
+stores:
+  - name: "default"
+    eviction_policy: "lru"
+    max_memory: "4GB"
+    default_ttl: 3600s
+  - name: "sessions"
+    eviction_policy: "ttl"
+    max_memory: "1GB"
+    default_ttl: 1800s
+  - name: "analytics"
+    eviction_policy: "lfu"
+    max_memory: "2GB"
+    default_ttl: 86400s

@@ -1,0 +1,63 @@
+# Node 1 Configuration for Local Cluster
+node:
+  id: "node-1"
+  data_dir: "/tmp/hypercache/node-1"
+
+network:
+  resp_bind_addr: "0.0.0.0"
+  resp_port: 8080
+  http_bind_addr: "0.0.0.0"
+  http_port: 9080
+  advertise_addr: "127.0.0.1"
+  gossip_port: 7946
+
+cluster:
+  seeds: ["127.0.0.1:7946", "127.0.0.1:7947", "127.0.0.1:7948"]
+  replication_factor: 3
+  consistency_level: "eventual"
+
+persistence:
+  enabled: true
+  strategy: "hybrid"
+  enable_aof: true
+  sync_policy: "everysec"
+  sync_interval: "1s"
+  snapshot_interval: "15m"
+  max_log_size: "100MB"
+  compression_level: 6
+  retain_logs: 3
+
+cache:
+  max_memory: "8GB"
+  default_ttl: "1h"
+  cuckoo_filter_fpp: 0.01
+
+storage:
+  wal_sync_interval: "10ms"
+  memtable_size: "64MB"
+  compaction_threads: 4
+
+stores:
+  - name: "default"
+    eviction_policy: "lru"
+    max_memory: "4GB"
+    default_ttl: "1h"
+  - name: "sessions"
+    eviction_policy: "ttl"
+    max_memory: "1GB"
+    default_ttl: "30m"
+  - name: "analytics"
+    eviction_policy: "lfu"
+    max_memory: "2GB"
+    default_ttl: "24h"
+
+# Logging Configuration
+logging:
+  level: "debug"             # More verbose logging for node 1
+  enable_console: true       # Enable console output
+  enable_file: true         # Enable file output
+  log_dir: "logs"           # Log directory
+  log_file: "logs/node-1.log"  # Specific log file for this node
+  buffer_size: 1000         # Async log buffer size
+  max_file_size: "100MB"    # Maximum log file size before rotation
+  max_files: 10             # Maximum number of log files to keep

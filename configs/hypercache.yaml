@@ -1,0 +1,84 @@
+# HyperCache Configuration File
+# Version 2.0 - Multi-Store Cache with Distributed Clustering
+
+# Node Configuration
+node:
+  id: "hypercache-node-1"
+  data_dir: "/tmp/hypercache"
+
+# Network Configuration (for multi-VM/container deployment)
+network:
+  resp_bind_addr: "0.0.0.0"      # Bind to all interfaces
+  resp_port: 8080                # Redis protocol port
+  http_bind_addr: "0.0.0.0"      # HTTP API bind address
+  http_port: 9080                # HTTP API port
+  advertise_addr: ""             # Auto-detect for localhost deployment
+  gossip_port: 7946              # Serf gossip port
+
+# Cluster Configuration  
+cluster:
+  seeds: ["127.0.0.1:7946"]      # Single seed for localhost testing
+  replication_factor: 3
+  consistency_level: "eventual"
+
+# Storage Engine Configuration
+storage:
+  wal_sync_interval: "10ms"
+  memtable_size: "64MB"
+  compaction_threads: 4
+  
+# Persistence Configuration
+persistence:
+  enabled: true
+  strategy: "hybrid"           # Options: "aof", "snapshot", "hybrid"
+  enable_aof: true
+  sync_policy: "everysec"      # Options: "always", "everysec", "no"
+  sync_interval: "1s"
+  snapshot_interval: "15m"
+  max_log_size: "100MB"
+  compression_level: 6         # 0-9, where 0=no compression, 9=max compression
+  retain_logs: 3               # Number of old logs to keep
+
+# Global Cache Configuration
+cache:
+  max_memory: "8GB"
+  default_ttl: "1h"
+  cuckoo_filter_fpp: 0.01  # 1% false positive rate
+
+# Store Configurations - The Innovation!
+# Each store can have different eviction policies
+stores:
+  - name: "default"
+    eviction_policy: "lru"
+    max_memory: "4GB"
+    default_ttl: "1h"
+    
+  - name: "sessions"
+    eviction_policy: "ttl"
+    max_memory: "1GB" 
+    default_ttl: "30m"
+    
+  - name: "hot_data"
+    eviction_policy: "lru"
+    max_memory: "2GB"
+    default_ttl: "2h"
+    
+  - name: "analytics"
+    eviction_policy: "lfu"
+    max_memory: "512MB"
+    default_ttl: "24h"
+    
+  - name: "bulk_cache"
+    eviction_policy: "fifo"
+    max_memory: "512MB"
+    default_ttl: "6h"
+
+# Logging Configuration
+logging:
+  level: "info"              # debug, info, warn, error, fatal
+  enable_console: true       # Enable console output
+  enable_file: true         # Enable file output
+  log_dir: "logs"           # Log directory
+  buffer_size: 1000         # Async log buffer size
+  max_file_size: "100MB"    # Maximum log file size before rotation
+  max_files: 10             # Maximum number of log files to keep

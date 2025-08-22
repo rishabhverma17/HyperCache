@@ -1,0 +1,64 @@
+# HyperCache Multi-VM Configuration Example
+# This configuration supports deployment across multiple VMs/containers
+
+node:
+  id: "vm1-node"              # Unique identifier for this node
+  data_dir: "/opt/hypercache/data"
+
+network:
+  # RESP Protocol (Redis-compatible) API
+  resp_bind_addr: "0.0.0.0"   # Bind to all interfaces (VM-friendly)
+  resp_port: 8080             # Redis protocol port
+  
+  # HTTP REST API  
+  http_bind_addr: "0.0.0.0"   # Bind to all interfaces (VM-friendly)
+  http_port: 9080             # HTTP API port
+  
+  # Cluster Communication
+  advertise_addr: "10.0.1.4"  # IP other nodes use to connect (VM's actual IP)
+  gossip_port: 7946           # Serf gossip protocol port
+
+cluster:
+  seeds:                      # Seed nodes for cluster formation
+    - "10.0.1.4:7946"         # VM1 gossip address
+    - "10.0.1.5:7946"         # VM2 gossip address  
+    - "10.0.1.6:7946"         # VM3 gossip address
+  replication_factor: 3       # Data replicated across 3 nodes
+  consistency_level: "eventual"
+
+persistence:
+  enabled: true
+  strategy: "hybrid"          # Use both AOF and snapshots
+  enable_aof: true
+  sync_policy: "everysec"     # Sync to disk every second
+  sync_interval: 1s
+  snapshot_interval: 15m
+  max_log_size: "100MB"
+  compression_level: 6
+  retain_logs: 3
+
+cache:
+  max_memory: "8GB"
+  default_ttl: "1h"
+  cuckoo_filter_fpp: 0.01     # 1% false positive rate
+
+storage:
+  wal_sync_interval: 10ms
+  memtable_size: "64MB"
+  compaction_threads: 4
+
+stores:
+  - name: "default"
+    eviction_policy: "lru"
+    max_memory: "4GB"
+    default_ttl: 3600s
+    
+  - name: "sessions"
+    eviction_policy: "ttl"
+    max_memory: "1GB"
+    default_ttl: 1800s
+    
+  - name: "analytics"
+    eviction_policy: "lfu"
+    max_memory: "2GB"
+    default_ttl: 86400s
