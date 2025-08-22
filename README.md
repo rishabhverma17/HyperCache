@@ -1,4 +1,4 @@
-# HyperCache - Production-Grade Distributed Cache
+# HyperCache - Distributed Cache
 
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)]()
 [![Go Version](https://img.shields.io/badge/Go-1.23.2-blue)]()
@@ -646,4 +646,4 @@ MIT License - feel free to use in your projects!
 
 ---
 
-**Made with ❤️ in Go** | **Production Ready** | **Redis Compatible** | **Enterprise Observability**
+**Made with ❤️ in Go** | **Redis Compatible** | **Enterprise Observability**

@@ -78,6 +78,32 @@ debug
 local-*.yaml
 local-*.yml
 
+# Development and internal documentation files
+docs/binary-protocol-specification.md
+docs/concurrency-patterns-demo.go
+docs/configuration-driven-multivm.md
+docs/consistent-hashing-deep-dive.md
+docs/context-examples.go
+docs/cuckoo-filter-internals.md
+docs/distributed-architecture-plan.md
+docs/distributed-persistence-plan.md
+docs/filter-integration-summary.md
+docs/hash-ring-foundation-complete.md
+docs/hash-ring-implementation-summary.md
+docs/implementation-guide.md
+docs/implementation-plan.md
+docs/implementation-roadmap.md
+docs/KNOWN_ISSUES.md
+docs/logging-quick-guide.md
+docs/memory-pressure-examples.go
+docs/method-receiver-examples.go
+docs/persistence-file-locations.md
+docs/production-polish-roadmap.md
+docs/raft-consensus-deep-dive.md
+docs/redis-cli-testing-guide.md
+docs/resp-protocol-specification.md
+docs/session-overflow-scenario.go
+
 # Binary File
 ./main
 

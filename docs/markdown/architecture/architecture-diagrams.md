@@ -261,17 +261,8 @@ graph TB
 ```
 
 ## Implementation Notes:
-
-### Version 1.0 Scope:
 - ✅ Multi-store with per-store eviction policies
 - ✅ O(1) operations with optimized data structures
 - ✅ Basic networking with custom protocol
 - ✅ WAL + simple LSM storage
 - ✅ Cuckoo filter integration
-
-### Future Versions:
-- 🔄 Redis protocol compatibility
-- 🔄 Advanced monitoring and metrics
-- 🔄 Multi-datacenter replication
-- 🔄 Compression and encryption
-- 🔄 Advanced data types (lists, sets, etc.)
