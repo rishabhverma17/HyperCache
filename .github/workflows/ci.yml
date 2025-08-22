@@ -42,7 +42,7 @@ jobs:
     - name: Build binary
       run: |
         mkdir -p bin
-        go build -v -o bin/hypercache cmd/hypercache/main.go
+        go build -v -o bin/hypercache ./cmd/hypercache
 
     - name: Test binary execution
       run: |
