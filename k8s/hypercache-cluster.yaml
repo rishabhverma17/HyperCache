@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hypercache
+  labels:
+    app: hypercache
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hypercache-config
+  namespace: hypercache
+data:
+  hypercache.yaml: |
+    node:
+      id: "${NODE_ID}"
+      data_dir: "/data"
+
+    network:
+      resp_bind_addr: "0.0.0.0"
+      resp_port: 8080
+      http_bind_addr: "0.0.0.0"
+      http_port: 9080
+      advertise_addr: "${POD_IP}"
+      gossip_port: 7946
+
+    cluster:
+      seeds: 
+        - "hypercache-0.hypercache-headless.hypercache.svc.cluster.local:7946"
+        - "hypercache-1.hypercache-headless.hypercache.svc.cluster.local:7946"
+        - "hypercache-2.hypercache-headless.hypercache.svc.cluster.local:7946"
+      replication_factor: 3
+      consistency_level: "eventual"
+
+    persistence:
+      enabled: true
+      strategy: "hybrid"
+      enable_aof: true
+      sync_policy: "everysec"
+      sync_interval: "1s"
+      snapshot_interval: "15m"
+      max_log_size: "100MB"
+      compression_level: 6
+      retain_logs: 3
+
+    cache:
+      stores:
+        - name: "default"
+          eviction_policy: "lru"
+          max_memory: "512MB"
+          ttl: "1h"
+          enable_cuckoo_filter: true
+          cuckoo_filter_capacity: 50000
+          cuckoo_filter_fpp: 0.01
+          enable_persistence: true
+
+    logging:
+      level: "info"
+      max_file_size: "100MB"
+      max_files: 5
+      output: ["console", "file"]
+      structured: true
+      file_path: "/app/logs/hypercache.log"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hypercache-headless
+  namespace: hypercache
+  labels:
+    app: hypercache
+spec:
+  clusterIP: None
+  selector:
+    app: hypercache
+  ports:
+  - name: gossip
+    port: 7946
+    targetPort: 7946
+  - name: resp
+    port: 8080
+    targetPort: 8080
+  - name: http
+    port: 9080
+    targetPort: 9080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hypercache-service
+  namespace: hypercache
+  labels:
+    app: hypercache
+spec:
+  selector:
+    app: hypercache
+  type: LoadBalancer
+  ports:
+  - name: resp
+    port: 8080
+    targetPort: 8080
+  - name: http
+    port: 9080
+    targetPort: 9080
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hypercache
+  namespace: hypercache
+  labels:
+    app: hypercache
+spec:
+  serviceName: hypercache-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hypercache
+  template:
+    metadata:
+      labels:
+        app: hypercache
+    spec:
+      initContainers:
+      - name: wait-for-dns
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          for i in $(seq 0 2); do
+            until nslookup hypercache-$i.hypercache-headless.hypercache.svc.cluster.local; do
+              echo "Waiting for hypercache-$i DNS..."
+              sleep 2
+            done
+          done
+          echo "All DNS records ready"
+      containers:
+      - name: hypercache
+        image: hypercache/hypercache:latest
+        env:
+        - name: NODE_ID
+          value: "node-$(hostname | sed 's/hypercache-//')"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        ports:
+        - containerPort: 8080
+          name: resp
+        - containerPort: 9080
+          name: http
+        - containerPort: 7946
+          name: gossip
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: data
+          mountPath: /data
+        - name: logs
+          mountPath: /app/logs
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 9080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+      volumes:
+      - name: config
+        configMap:
+          name: hypercache-config
+      - name: logs
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hypercache-monitor
+  namespace: hypercache
+  labels:
+    app: hypercache
+spec:
+  selector:
+    app: hypercache
+  ports:
+  - name: metrics
+    port: 9090
+    targetPort: 9090

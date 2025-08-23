@@ -24,6 +24,12 @@ This starts both the HyperCache cluster and monitoring stack (Elasticsearch, Gra
 - **`start-system.sh`** - Master script to start cluster and/or monitoring
 - **`build-and-run.sh`** - Build and run HyperCache cluster
 - **`build-hypercache.sh`** - Build HyperCache binaries only
+- **`docker-deploy.sh`** - Complete Docker deployment automation
+
+### 🐳 **Docker Testing**
+For comprehensive Docker testing instructions, see:
+- **[Local Docker Testing Guide](Local-Docker-Testing-Guide.md)** - Complete guide for testing with Docker locally
+- **[Docker Deployment Guide](Docker-Deployment-Guide.md)** - Production Docker deployment documentation
 
 ### Data Management
 - **`clean-persistence.sh`** - Clean HyperCache node persistence data
