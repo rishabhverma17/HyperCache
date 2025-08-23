@@ -1,0 +1,105 @@
+filebeat.inputs:
+# HyperCache application logs from shared volume
+- type: log
+  enabled: true
+  paths:
+    - /var/log/hypercache/node-*.log
+  json.keys_under_root: true
+  json.add_error_key: true
+  fields:
+    hypercache_service: hypercache
+    environment: docker
+    log_type: application
+  fields_under_root: true
+
+# Docker container logs (optional - for system events)
+- type: container
+  enabled: true
+  paths:
+    - '/var/lib/docker/containers/*/*.log'
+  containers.ids:
+    - "hypercache-*"
+  fields:
+    hypercache_service: hypercache
+    environment: docker
+    log_type: container
+  fields_under_root: true
+
+processors:
+# Add Docker metadata
+- add_docker_metadata:
+    host: "unix:///var/run/docker.sock"
+
+# Extract container name and image
+- script:
+    lang: javascript
+    source: >
+      function process(event) {
+        var container = event.Get("container");
+        if (container && container.name && typeof container.name === 'string') {
+          if (container.name.indexOf("hypercache-") === 0) {
+            event.Put("hypercache.node_id", container.name.replace("hypercache-", ""));
+          }
+        }
+      }
+
+# Enrich with Kubernetes metadata if deployed in K8s
+- add_kubernetes_metadata:
+    when.equals:
+      kubernetes.pod.name: "hypercache-*"
+
+output.elasticsearch:
+  hosts: ["hypercache-elasticsearch:9200"]
+  index: "hypercache-docker-logs-%{+yyyy.MM.dd}"
+  template.enabled: true
+  template.pattern: "hypercache-docker-*"
+
+setup.template.enabled: true
+setup.template.name: "hypercache-docker"
+setup.template.pattern: "hypercache-docker-*"
+setup.template.settings:
+  index.number_of_shards: 1
+  index.number_of_replicas: 0
+
+# Index lifecycle management
+setup.ilm.enabled: true
+setup.ilm.rollover_alias: "hypercache-docker-logs"
+setup.ilm.pattern: "{now/d}-000001"
+setup.ilm.policy: |
+  {
+    "policy": {
+      "phases": {
+        "hot": {
+          "actions": {
+            "rollover": {
+              "max_size": "1GB",
+              "max_age": "1d"
+            }
+          }
+        },
+        "warm": {
+          "min_age": "7d",
+          "actions": {
+            "allocate": {
+              "number_of_replicas": 0
+            }
+          }
+        },
+        "delete": {
+          "min_age": "30d"
+        }
+      }
+    }
+  }
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
+
+http.enabled: true
+http.host: 0.0.0.0
+http.port: 5066

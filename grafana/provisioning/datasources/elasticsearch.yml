@@ -4,14 +4,16 @@ datasources:
   - name: HyperCache Logs
     type: elasticsearch
     access: proxy
-    url: http://elasticsearch:9200
-    database: "logs-*"
+    url: http://hypercache-elasticsearch:9200
+    database: "hypercache-logs"
     isDefault: true
     jsonData:
       interval: Daily
       timeField: "@timestamp"
-      esVersion: "7.10.0"
+      esVersion: "8.11.0"
       maxConcurrentShardRequests: 5
       logMessageField: "message"
       logLevelField: "level"
+      includeFrozen: false
+      xpack: false
     readOnly: false

@@ -27,23 +27,48 @@
 
 ## 🚀 **Quick Start**
 
-### Start Complete System (Recommended)
+### 🐳 Docker Deployment (Recommended)
+```bash
+# Build and start containerized cluster with monitoring
+./scripts/docker-deploy.sh deploy
+
+# Or pull from Docker Hub and start
+docker-compose -f docker-compose.cluster.yml up -d
+
+# Test the cluster
+./scripts/docker-deploy.sh test
+```
+
+### 🔧 Local Development
 ```bash
 # Start both cluster and monitoring stack
 ./scripts/start-system.sh
 
 # Or start with clean data
 ./scripts/start-system.sh --clean
-
-# Access points:
-# - Cluster nodes: http://localhost:9080, 9081, 9082
-# - Grafana: http://localhost:3000 (admin/admin123)
-# - Elasticsearch: http://localhost:9200
 ```
 
-### Start Individual Components
+### 📊 Access Points
+- **HyperCache Nodes**: http://localhost:9080, 9081, 9082
+- **Grafana Dashboards**: http://localhost:3000 (admin/admin123)
+- **Elasticsearch**: http://localhost:9200
+- **Docker Hub**: `docker pull hypercache/hypercache:latest`
 
-#### HyperCache Cluster Only
+## 🔥 **Deployment Options**
+
+### 🐳 **Docker (Production-Ready)**
+```bash
+# Pull from Docker Hub
+docker pull hypercache/hypercache:latest
+
+# Start 3-node cluster with monitoring
+docker-compose -f docker-compose.cluster.yml up -d
+
+# Kubernetes deployment
+kubectl apply -f k8s/hypercache-cluster.yaml
+```
+
+### 🔧 **Local Development**
 ```bash
 # Build and start 3-node cluster
 ./scripts/build-and-run.sh cluster
@@ -52,7 +77,7 @@
 ./scripts/build-and-run.sh run node-1
 ```
 
-#### Monitoring Stack Only  
+### 📊 **Monitoring Stack Only**  
 ```bash
 # Start Elasticsearch, Grafana, and Filebeat
 docker-compose -f docker-compose.logging.yml up -d
@@ -99,6 +124,14 @@ curl http://localhost:9080/health
 - **Fast Recovery**: Complete data restoration in milliseconds (160µs for 10 entries)
 - **Snapshot Support**: Point-in-time recovery with configurable intervals
 - **Durability Guarantees**: Configurable sync policies (fsync, async, periodic)
+
+### **Containerized Deployment**
+- **Docker Hub Integration**: Pre-built multi-arch images (amd64, arm64)
+- **Docker Compose Support**: One-command cluster deployment with monitoring
+- **Kubernetes Ready**: StatefulSet manifests with service discovery
+- **Minimal Attack Surface**: Scratch-based images, non-root user
+- **Auto-scaling**: Dynamic cluster membership and load balancing
+- **CI/CD Pipeline**: Automated builds and security scanning
 
 ### **Advanced Memory Management**
 - **Per-Store Eviction Policies**: Independent LRU, LFU, or session-based eviction per store
@@ -166,15 +199,15 @@ HyperCache/
        ┌─────────────────────────────────────────────────┼─────────────────────────────────────────────────┐
        │                                                 │                                                 │
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Memory Pool   │    │   Data Storage   │    │ Cuckoo Filter   │    │   Hash Ring     │    │   Gossip Node   │
-│   (Pressure     │    │   + Persistence  │    │ (Probabilistic  │    │ (Consistent     │    │   Discovery     │
-│    Monitoring)  │    │   (AOF+Snapshot) │    │   Operations)   │    │   Hashing)      │    │   & Failover    │
+│   Memory Pool   │    │   Data Storage   │    │ Cuckoo Filter   │    │   Hash Ring     │    │   Gossip Node    │
+│   (Pressure     │    │   + Persistence  │    │ (Probabilistic  │    │ (Consistent     │    │   Discovery      │
+│    Monitoring)  │    │   (AOF+Snapshot) │    │   Operations)   │    │   Hashing)      │    │   & Failover     │
 └─────────────────┘    └──────────────────┘    └─────────────────┘    └──────────────────┘    └─────────────────┘
        │                         │                         │                         │                         │
        └─────────────────────────┼─────────────────────────┼─────────────────────────┼─────────────────────────┘
                                  │                         │                         │
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    MONITORING STACK                                                           │
+│                                    MONITORING STACK                                                         │
 ├─────────────────┬──────────────────┬─────────────────┬──────────────────┬─────────────────┬─────────────────┤
 │    Filebeat     │   Elasticsearch  │     Grafana     │   Health API     │   Metrics       │   Alerting      │
 │  (Log Shipper)  │  (Log Storage)   │  (Dashboards)   │  (Diagnostics)   │  (Performance)  │  (Monitoring)   │

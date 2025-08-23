@@ -1,0 +1,210 @@
+version: '3.8'
+
+services:
+  # Initialize volumes with proper permissions
+  volume-init:
+    image: alpine:3.18
+    command: |
+      sh -c "
+        mkdir -p /app/logs && 
+        chown -R 1000:1000 /app/logs &&
+        chmod -R 755 /app/logs &&
+        echo 'Volumes initialized with proper permissions'
+      "
+    volumes:
+      - hypercache_logs:/app/logs
+    restart: "no"
+
+  # HyperCache Node 1 (Bootstrap node)
+  hypercache-node1:
+    image: hypercache/hypercache:latest
+    container_name: hypercache-node1
+    hostname: hypercache-node1
+    user: "1000:1000"
+    command: ["--config", "/config/hypercache.yaml", "--protocol", "resp"]
+    environment:
+      - NODE_ID=node-1
+      - CLUSTER_SEEDS=hypercache-node1:7946,hypercache-node2:7946,hypercache-node3:7946
+      - DATA_DIR=/data
+      - LOG_LEVEL=info
+    volumes:
+      - ./configs/docker/node1-config.yaml:/config/hypercache.yaml:ro
+      - hypercache_node1_data:/data
+      - hypercache_logs:/app/logs
+    ports:
+      - "8080:8080"  # RESP Protocol
+      - "9080:9080"  # HTTP API
+      - "7946:7946"  # Gossip Protocol
+    networks:
+      hypercache-cluster:
+        ipv4_address: 172.20.0.10
+      logging:
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # HyperCache Node 2
+  hypercache-node2:
+    image: hypercache/hypercache:latest
+    container_name: hypercache-node2
+    hostname: hypercache-node2
+    user: "1000:1000"
+    command: ["--config", "/config/hypercache.yaml", "--protocol", "resp"]
+    environment:
+      - NODE_ID=node-2
+      - CLUSTER_SEEDS=hypercache-node1:7946,hypercache-node2:7946,hypercache-node3:7946
+      - DATA_DIR=/data
+      - LOG_LEVEL=info
+    volumes:
+      - ./configs/docker/node2-config.yaml:/config/hypercache.yaml:ro
+      - hypercache_node2_data:/data
+      - hypercache_logs:/app/logs
+    ports:
+      - "8081:8080"  # RESP Protocol
+      - "9081:9080"  # HTTP API
+      - "7947:7946"  # Gossip Protocol
+    networks:
+      hypercache-cluster:
+        ipv4_address: 172.20.0.11
+      logging:
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      hypercache-node1:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # HyperCache Node 3
+  hypercache-node3:
+    image: hypercache/hypercache:latest
+    container_name: hypercache-node3
+    hostname: hypercache-node3
+    user: "1000:1000"
+    command: ["--config", "/config/hypercache.yaml", "--protocol", "resp"]
+    environment:
+      - NODE_ID=node-3
+      - CLUSTER_SEEDS=hypercache-node1:7946,hypercache-node2:7946,hypercache-node3:7946
+      - DATA_DIR=/data
+      - LOG_LEVEL=info
+    volumes:
+      - ./configs/docker/node3-config.yaml:/config/hypercache.yaml:ro
+      - hypercache_node3_data:/data
+      - hypercache_logs:/app/logs
+    ports:
+      - "8082:8080"  # RESP Protocol
+      - "9082:9080"  # HTTP API
+      - "7948:7946"  # Gossip Protocol
+    networks:
+      hypercache-cluster:
+        ipv4_address: 172.20.0.12
+      logging:
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      hypercache-node1:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Include existing logging infrastructure
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: hypercache-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.11.0
+    container_name: hypercache-filebeat
+    user: root
+    volumes:
+      - ./filebeat-docker.yml:/usr/share/filebeat/filebeat.yml:ro
+      - hypercache_logs:/var/log/hypercache:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - logging
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: hypercache-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - logging
+    restart: unless-stopped
+
+volumes:
+  hypercache_node1_data:
+  hypercache_node2_data:
+  hypercache_node3_data:
+  hypercache_logs:
+  elasticsearch_data:
+  grafana_data:
+
+networks:
+  hypercache-cluster:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  logging:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

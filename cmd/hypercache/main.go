@@ -332,6 +332,35 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 		json.NewEncoder(w).Encode(response)
 	})
 	
+	// Cluster members endpoint
+	mux.HandleFunc("/api/cluster/members", func(w http.ResponseWriter, r *http.Request) {
+		// Extract correlation ID from context
+		correlationID := logging.GetCorrelationID(r.Context())
+		if correlationID == "" {
+			correlationID = logging.NewCorrelationID()
+			r = r.WithContext(logging.WithCorrelationID(r.Context(), correlationID))
+		}
+		
+		logging.Info(r.Context(), logging.ComponentHTTP, "cluster_members", "Cluster members requested")
+		
+		membership := coordinator.GetMembership()
+		if membership == nil {
+			http.Error(w, "Cluster membership not available", http.StatusServiceUnavailable)
+			return
+		}
+		
+		members := membership.GetMembers()
+		response := map[string]interface{}{
+			"members":        members,
+			"total_count":    len(members),
+			"node":           nodeID,
+			"correlation_id": correlationID,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Correlation-ID", correlationID)
+		json.NewEncoder(w).Encode(response)
+	})
+	
 	// Cache operations with middleware
 	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID))))
 	

@@ -1,0 +1,48 @@
+# Node 2 Docker Configuration
+node:
+  id: "node-2"
+  data_dir: "/data"
+  protocol: "resp"
+
+network:
+  resp_bind_addr: "0.0.0.0"
+  resp_port: 8080
+  http_bind_addr: "0.0.0.0"
+  http_port: 9080
+  advertise_addr: "172.20.0.11"
+  gossip_port: 7946
+
+cluster:
+  seeds: ["172.20.0.10:7946", "172.20.0.11:7946", "172.20.0.12:7946"]
+  replication_factor: 3
+  consistency_level: "eventual"
+
+persistence:
+  enabled: true
+  strategy: "hybrid"
+  enable_aof: true
+  sync_policy: "everysec"
+  sync_interval: "1s"
+  snapshot_interval: "15m"
+  max_log_size: "100MB"
+  compression_level: 6
+  retain_logs: 3
+
+cache:
+  stores:
+    - name: "default"
+      eviction_policy: "lru"
+      max_memory: "256MB"
+      ttl: "1h"
+      enable_cuckoo_filter: true
+      cuckoo_filter_capacity: 10000
+      cuckoo_filter_fpp: 0.01
+      enable_persistence: true
+
+logging:
+  level: "debug"
+  max_file_size: "100MB"
+  max_files: 5
+  output: ["console", "file"]
+  structured: true
+  log_dir: "/app/logs"
