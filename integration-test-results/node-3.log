@@ -1,0 +1,269 @@
+🚀 Starting HyperCache Node: node-3
+📡 Protocol: resp
+📡 RESP API: 0.0.0.0:8082
+📡 HTTP API: 0.0.0.0:9082
+📡 Gossip: 127.0.0.1:10082
+💾 Data directory: ./test-data/node-3/node-3
+AOF initialized: ./test-data/node-3/node-3
+Persistence engine started (AOF: true, Snapshots: true)
+AOF replay completed: 0 entries in 4.418µs
+No persistence entries to recover
+2025/08/24 07:53:25 ✅ Persistence enabled and started: ./test-data/node-3/node-3
+2025/08/24 07:53:25 [INFO] serf: EventMemberJoin: node-3 127.0.0.1
+Attempting to join cluster via 127.0.0.1:10080...
+Node joined: node-3 (127.0.0.1:10082)
+2025/08/24 07:53:25 [DEBUG] memberlist: Initiating push/pull sync with:  127.0.0.1:10080
+2025/08/24 07:53:25 [INFO] serf: EventMemberJoin: node-1 127.0.0.1
+2025/08/24 07:53:25 [INFO] serf: EventMemberJoin: node-2 127.0.0.1
+Node joined: node-1 (127.0.0.1:10080)
+Successfully joined cluster via 127.0.0.1:10080 (1 members)
+[EVENT_BUS] Delivering local event to 0 subscribers
+Node joined: node-2 (127.0.0.1:10081)
+[GOSSIP] User event received: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-1","data":"node_started","timestamp":"2025-08-24T07:53:21.879069716Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-1","data":"node_started","timestamp":"2025-08-24T07:53:21.879069716Z"})
+Distributed coordinator started: node-3
+[EVENT_BUS] Deserialized event: Type=topology_changed, NodeID=node-1, CorrelationID=, Data=node_started
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: )
+[EVENT_BUS] Delivering local event to 1 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+[GOSSIP] User event received: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-1","data":"node_added:node-2","timestamp":"2025-08-24T07:53:23.88507531Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-1","data":"node_added:node-2","timestamp":"2025-08-24T07:53:23.88507531Z"})
+[EVENT_BUS] Deserialized event: Type=topology_changed, NodeID=node-1, CorrelationID=, Data=node_added:node-2
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: )
+[EVENT_BUS] Delivering local event to 1 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+[GOSSIP] User event received: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-2","data":"node_started","timestamp":"2025-08-24T07:53:23.885060991Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-2","data":"node_started","timestamp":"2025-08-24T07:53:23.885060991Z"})
+[EVENT_BUS] Deserialized event: Type=topology_changed, NodeID=node-2, CorrelationID=, Data=node_started
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: )
+[EVENT_BUS] Delivering local event to 1 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+[GOSSIP] User event received: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-3","data":"node_started","timestamp":"2025-08-24T07:53:25.890805723Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-3","data":"node_started","timestamp":"2025-08-24T07:53:25.890805723Z"})
+[EVENT_BUS] Deserialized event: Type=topology_changed, NodeID=node-3, CorrelationID=, Data=node_started
+[EVENT_BUS] Skipping own event from node node-3
+Added node to hash ring: node-2 (127.0.0.1:10081)
+[EVENT_BUS] Delivering local event to 1 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+[GOSSIP] User event received: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-3","data":"node_added:node-2","timestamp":"2025-08-24T07:53:25.891005434Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-3","data":"node_added:node-2","timestamp":"2025-08-24T07:53:25.891005434Z"})
+[EVENT_BUS] Deserialized event: Type=topology_changed, NodeID=node-3, CorrelationID=, Data=node_added:node-2
+[EVENT_BUS] Skipping own event from node node-3
+🌐 RESP server listening on 0.0.0.0:8082 (Redis-compatible)
+[REPLICATION] Starting cluster event listener for node node-3
+[REPLICATION] Subscribed to EventDataOperation events
+🌐 HTTP API server starting on port 9082 for node node-3
+✅ HTTP API server started successfully on port 9082 for node node-3
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageJoinType: node-1
+2025/08/24 07:53:26 [DEBUG] serf: messageJoinType: node-2
+[GOSSIP] User event received: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-1","data":"node_added:node-3","timestamp":"2025-08-24T07:53:25.890644757Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-1","data":"node_added:node-3","timestamp":"2025-08-24T07:53:25.890644757Z"})
+[EVENT_BUS] Deserialized event: Type=topology_changed, NodeID=node-1, CorrelationID=, Data=node_added:node-3
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: )
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageJoinType: node-1
+2025/08/24 07:53:26 [DEBUG] serf: messageJoinType: node-2
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageJoinType: node-2
+[GOSSIP] User event received: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-2","data":"node_added:node-3","timestamp":"2025-08-24T07:53:26.879478505Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:topology_changed (payload: {"type":"topology_changed","node_id":"node-2","data":"node_added:node-3","timestamp":"2025-08-24T07:53:26.879478505Z"})
+[EVENT_BUS] Deserialized event: Type=topology_changed, NodeID=node-2, CorrelationID=, Data=node_added:node-3
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: )
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+[EVENT_BUS] Subscriber interested in [data_operation], event type: topology_changed, interested: false
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:26 [DEBUG] serf: messageJoinType: node-3
+2025/08/24 07:53:27 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:27 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:27 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:27 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:27 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:27 [DEBUG] serf: messageJoinType: node-3
+2025/08/24 07:53:28 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:28 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:28 [DEBUG] serf: messageUserEventType: cluster-event:topology_changed
+2025/08/24 07:53:28 [DEBUG] serf: messageJoinType: node-3
+2025/08/24 07:53:33 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:33 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:33 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"00ef9e42-d0ea-40fd-af1e-f324cdc37d60","data":{"key":"test_key_basic","operation":"DELETE"},"timestamp":"2025-08-24T07:53:32.955638379Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"00ef9e42-d0ea-40fd-af1e-f324cdc37d60","data":{"key":"test_key_basic","operation":"DELETE"},"timestamp":"2025-08-24T07:53:32.955638379Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-1, CorrelationID=00ef9e42-d0ea-40fd-af1e-f324cdc37d60, Data=map[key:test_key_basic operation:DELETE]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: 00ef9e42-d0ea-40fd-af1e-f324cdc37d60)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"597235be-e55c-475a-8d26-4645e9b8dfae","data":{"key":"test_key_basic","operation":"SET","ttl":3600,"value":"test_value_basic"},"timestamp":"2025-08-24T07:53:32.9390467Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"597235be-e55c-475a-8d26-4645e9b8dfae","data":{"key":"test_key_basic","operation":"SET","ttl":3600,"value":"test_value_basic"},"timestamp":"2025-08-24T07:53:32.9390467Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-1, CorrelationID=597235be-e55c-475a-8d26-4645e9b8dfae, Data=map[key:test_key_basic operation:SET ttl:3600 value:test_value_basic]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: 597235be-e55c-475a-8d26-4645e9b8dfae)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"c34380c0-a48e-4699-9cc4-62365815f241","data":{"key":"cross_node_test_key","operation":"SET","ttl":3600,"value":"cross_node_test_value"},"timestamp":"2025-08-24T07:53:32.969886173Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"c34380c0-a48e-4699-9cc4-62365815f241","data":{"key":"cross_node_test_key","operation":"SET","ttl":3600,"value":"cross_node_test_value"},"timestamp":"2025-08-24T07:53:32.969886173Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-1, CorrelationID=c34380c0-a48e-4699-9cc4-62365815f241, Data=map[key:cross_node_test_key operation:SET ttl:3600 value:cross_node_test_value]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: c34380c0-a48e-4699-9cc4-62365815f241)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[REPLICATION] [correlationId=00ef9e42-d0ea-40fd-af1e-f324cdc37d60] Received event: type=data_operation, nodeID='node-1', localID='node-3'
+[REPLICATION] [correlationId=00ef9e42-d0ea-40fd-af1e-f324cdc37d60] Processing data operation from remote node node-1
+[REPLICATION] [correlationId=00ef9e42-d0ea-40fd-af1e-f324cdc37d60] Processing event from node node-1: map[key:test_key_basic operation:DELETE]
+[REPLICATION] [correlationId=00ef9e42-d0ea-40fd-af1e-f324cdc37d60] Applying DELETE: key=test_key_basic
+[REPLICATION] [correlationId=00ef9e42-d0ea-40fd-af1e-f324cdc37d60] SUCCESS: Replicated DELETE for key=test_key_basic
+[REPLICATION] [correlationId=597235be-e55c-475a-8d26-4645e9b8dfae] Received event: type=data_operation, nodeID='node-1', localID='node-3'
+[REPLICATION] [correlationId=597235be-e55c-475a-8d26-4645e9b8dfae] Processing data operation from remote node node-1
+[REPLICATION] [correlationId=597235be-e55c-475a-8d26-4645e9b8dfae] Processing event from node node-1: map[key:test_key_basic operation:SET ttl:3600 value:test_value_basic]
+[REPLICATION] [correlationId=597235be-e55c-475a-8d26-4645e9b8dfae] Applying SET: key=test_key_basic, value=test_value_basic, ttl=1h0m0s
+[REPLICATION] [correlationId=597235be-e55c-475a-8d26-4645e9b8dfae] SUCCESS: Replicated SET for key=test_key_basic
+[REPLICATION] [correlationId=c34380c0-a48e-4699-9cc4-62365815f241] Received event: type=data_operation, nodeID='node-1', localID='node-3'
+[REPLICATION] [correlationId=c34380c0-a48e-4699-9cc4-62365815f241] Processing data operation from remote node node-1
+[REPLICATION] [correlationId=c34380c0-a48e-4699-9cc4-62365815f241] Processing event from node node-1: map[key:cross_node_test_key operation:SET ttl:3600 value:cross_node_test_value]
+[REPLICATION] [correlationId=c34380c0-a48e-4699-9cc4-62365815f241] Applying SET: key=cross_node_test_key, value=cross_node_test_value, ttl=1h0m0s
+[REPLICATION] [correlationId=c34380c0-a48e-4699-9cc4-62365815f241] SUCCESS: Replicated SET for key=cross_node_test_key
+2025/08/24 07:53:33 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:33 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:33 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:34 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:34 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:34 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[REPLICATION] [correlationId=f698c0ad-497d-4055-bf18-58fd891cb2bb] Received event: type=data_operation, nodeID='node-3', localID='node-3'
+[REPLICATION] [correlationId=f698c0ad-497d-4055-bf18-58fd891cb2bb] Skipping event: same_node=true (nodeID='node-3' vs localID='node-3')
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-3","correlation_id":"f698c0ad-497d-4055-bf18-58fd891cb2bb","data":{"key":"key3","operation":"SET","ttl":3600,"value":"test_value_2"},"timestamp":"2025-08-24T07:53:35.015180213Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-3","correlation_id":"f698c0ad-497d-4055-bf18-58fd891cb2bb","data":{"key":"key3","operation":"SET","ttl":3600,"value":"test_value_2"},"timestamp":"2025-08-24T07:53:35.015180213Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-3, CorrelationID=f698c0ad-497d-4055-bf18-58fd891cb2bb, Data=map[key:key3 operation:SET ttl:3600 value:test_value_2]
+[EVENT_BUS] Skipping own event from node node-3
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"f60ff218-795d-400a-82f2-926d099cd992","data":{"key":"key1","operation":"SET","ttl":3600,"value":"test_value_0"},"timestamp":"2025-08-24T07:53:35.003342586Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"f60ff218-795d-400a-82f2-926d099cd992","data":{"key":"key1","operation":"SET","ttl":3600,"value":"test_value_0"},"timestamp":"2025-08-24T07:53:35.003342586Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-1, CorrelationID=f60ff218-795d-400a-82f2-926d099cd992, Data=map[key:key1 operation:SET ttl:3600 value:test_value_0]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: f60ff218-795d-400a-82f2-926d099cd992)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"8812b5c6-966d-4afd-9b1e-4a6a06fd0b11","data":{"key":"key4","operation":"SET","ttl":3600,"value":"test_value_3"},"timestamp":"2025-08-24T07:53:35.020773465Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"8812b5c6-966d-4afd-9b1e-4a6a06fd0b11","data":{"key":"key4","operation":"SET","ttl":3600,"value":"test_value_3"},"timestamp":"2025-08-24T07:53:35.020773465Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-1, CorrelationID=8812b5c6-966d-4afd-9b1e-4a6a06fd0b11, Data=map[key:key4 operation:SET ttl:3600 value:test_value_3]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: 8812b5c6-966d-4afd-9b1e-4a6a06fd0b11)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[REPLICATION] [correlationId=f60ff218-795d-400a-82f2-926d099cd992] Received event: type=data_operation, nodeID='node-1', localID='node-3'
+[REPLICATION] [correlationId=f60ff218-795d-400a-82f2-926d099cd992] Processing data operation from remote node node-1
+[REPLICATION] [correlationId=f60ff218-795d-400a-82f2-926d099cd992] Processing event from node node-1: map[key:key1 operation:SET ttl:3600 value:test_value_0]
+[REPLICATION] [correlationId=f60ff218-795d-400a-82f2-926d099cd992] Applying SET: key=key1, value=test_value_0, ttl=1h0m0s
+[REPLICATION] [correlationId=f60ff218-795d-400a-82f2-926d099cd992] SUCCESS: Replicated SET for key=key1
+[REPLICATION] [correlationId=8812b5c6-966d-4afd-9b1e-4a6a06fd0b11] Received event: type=data_operation, nodeID='node-1', localID='node-3'
+[REPLICATION] [correlationId=8812b5c6-966d-4afd-9b1e-4a6a06fd0b11] Processing data operation from remote node node-1
+[REPLICATION] [correlationId=8812b5c6-966d-4afd-9b1e-4a6a06fd0b11] Processing event from node node-1: map[key:key4 operation:SET ttl:3600 value:test_value_3]
+[REPLICATION] [correlationId=8812b5c6-966d-4afd-9b1e-4a6a06fd0b11] Applying SET: key=key4, value=test_value_3, ttl=1h0m0s
+[REPLICATION] [correlationId=8812b5c6-966d-4afd-9b1e-4a6a06fd0b11] SUCCESS: Replicated SET for key=key4
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-2","correlation_id":"fdbf2272-2456-4033-b412-8694b6c81328","data":{"key":"key2","operation":"SET","ttl":3600,"value":"test_value_1"},"timestamp":"2025-08-24T07:53:35.009473962Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-2","correlation_id":"fdbf2272-2456-4033-b412-8694b6c81328","data":{"key":"key2","operation":"SET","ttl":3600,"value":"test_value_1"},"timestamp":"2025-08-24T07:53:35.009473962Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-2, CorrelationID=fdbf2272-2456-4033-b412-8694b6c81328, Data=map[key:key2 operation:SET ttl:3600 value:test_value_1]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: fdbf2272-2456-4033-b412-8694b6c81328)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-2","correlation_id":"69eff804-017a-4248-8eda-f7b6b7e6dd23","data":{"key":"key5","operation":"SET","ttl":3600,"value":"test_value_4"},"timestamp":"2025-08-24T07:53:35.026487992Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-2","correlation_id":"69eff804-017a-4248-8eda-f7b6b7e6dd23","data":{"key":"key5","operation":"SET","ttl":3600,"value":"test_value_4"},"timestamp":"2025-08-24T07:53:35.026487992Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-2, CorrelationID=69eff804-017a-4248-8eda-f7b6b7e6dd23, Data=map[key:key5 operation:SET ttl:3600 value:test_value_4]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: 69eff804-017a-4248-8eda-f7b6b7e6dd23)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[REPLICATION] [correlationId=fdbf2272-2456-4033-b412-8694b6c81328] Received event: type=data_operation, nodeID='node-2', localID='node-3'
+[REPLICATION] [correlationId=fdbf2272-2456-4033-b412-8694b6c81328] Processing data operation from remote node node-2
+[REPLICATION] [correlationId=fdbf2272-2456-4033-b412-8694b6c81328] Processing event from node node-2: map[key:key2 operation:SET ttl:3600 value:test_value_1]
+[REPLICATION] [correlationId=fdbf2272-2456-4033-b412-8694b6c81328] Applying SET: key=key2, value=test_value_1, ttl=1h0m0s
+[REPLICATION] [correlationId=fdbf2272-2456-4033-b412-8694b6c81328] SUCCESS: Replicated SET for key=key2
+[REPLICATION] [correlationId=69eff804-017a-4248-8eda-f7b6b7e6dd23] Received event: type=data_operation, nodeID='node-2', localID='node-3'
+[REPLICATION] [correlationId=69eff804-017a-4248-8eda-f7b6b7e6dd23] Processing data operation from remote node node-2
+[REPLICATION] [correlationId=69eff804-017a-4248-8eda-f7b6b7e6dd23] Processing event from node node-2: map[key:key5 operation:SET ttl:3600 value:test_value_4]
+[REPLICATION] [correlationId=69eff804-017a-4248-8eda-f7b6b7e6dd23] Applying SET: key=key5, value=test_value_4, ttl=1h0m0s
+[REPLICATION] [correlationId=69eff804-017a-4248-8eda-f7b6b7e6dd23] SUCCESS: Replicated SET for key=key5
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:35 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:36 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:37 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:37 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:37 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:38 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+[GOSSIP] User event received: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"ab0e138a-3040-4358-88fa-a01b6edb1237","data":{"key":"ttl_test_key","operation":"SET","ttl":3600,"value":"ttl_test_value"},"timestamp":"2025-08-24T07:53:38.086254349Z"})
+[EVENT_BUS] Processing gossip event: cluster-event:data_operation (payload: {"type":"data_operation","node_id":"node-1","correlation_id":"ab0e138a-3040-4358-88fa-a01b6edb1237","data":{"key":"ttl_test_key","operation":"SET","ttl":3600,"value":"ttl_test_value"},"timestamp":"2025-08-24T07:53:38.086254349Z"})
+[EVENT_BUS] Deserialized event: Type=data_operation, NodeID=node-1, CorrelationID=ab0e138a-3040-4358-88fa-a01b6edb1237, Data=map[key:ttl_test_key operation:SET ttl:3600 value:ttl_test_value]
+[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: ab0e138a-3040-4358-88fa-a01b6edb1237)
+[EVENT_BUS] Delivering local event to 2 subscribers
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[EVENT_BUS] Subscriber interested in [data_operation], event type: data_operation, interested: true
+[EVENT_BUS] Event delivered to subscriber
+[REPLICATION] [correlationId=ab0e138a-3040-4358-88fa-a01b6edb1237] Received event: type=data_operation, nodeID='node-1', localID='node-3'
+[REPLICATION] [correlationId=ab0e138a-3040-4358-88fa-a01b6edb1237] Processing data operation from remote node node-1
+[REPLICATION] [correlationId=ab0e138a-3040-4358-88fa-a01b6edb1237] Processing event from node node-1: map[key:ttl_test_key operation:SET ttl:3600 value:ttl_test_value]
+[REPLICATION] [correlationId=ab0e138a-3040-4358-88fa-a01b6edb1237] Applying SET: key=ttl_test_key, value=ttl_test_value, ttl=1h0m0s
+[REPLICATION] [correlationId=ab0e138a-3040-4358-88fa-a01b6edb1237] SUCCESS: Replicated SET for key=ttl_test_key
+2025/08/24 07:53:38 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:39 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+2025/08/24 07:53:40 [DEBUG] serf: messageUserEventType: cluster-event:data_operation
+
+🛑 Shutting down HyperCache node: node-3
+✅ HyperCache shutdown complete
+🛑 HTTP API server shutting down for node node-3

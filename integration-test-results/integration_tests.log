@@ -1,0 +1,102 @@
+2025-08-24 07:43:10 [PASS] Health_Check_Node_1 - HTTP health check successful (port 9080)
+2025-08-24 07:43:10 [PASS] Health_Check_Node_2 - HTTP health check successful (port 9081)
+2025-08-24 07:43:10 [PASS] Health_Check_Node_3 - HTTP health check successful (port 9082)
+2025-08-24 07:43:10 [PASS] Basic_PUT_Operation - PUT operation successful
+2025-08-24 07:43:10 [PASS] Basic_GET_Operation - GET operation successful, value retrieved
+2025-08-24 07:43:10 [PASS] Basic_DELETE_Operation - DELETE operation successful
+2025-08-24 07:43:10 [PASS] DELETE_Verification - Key successfully deleted (404 on GET)
+2025-08-24 07:43:10 [PASS] Cross_Node_PUT - Data stored on node 1
+2025-08-24 07:43:12 [FAIL] Cross_Node_GET_Node_2 - Failed to retrieve data from node 2 (code: 200)
+2025-08-24 07:43:12 [FAIL] Cross_Node_GET_Node_3 - Failed to retrieve data from node 3 (code: 200)
+2025-08-24 07:43:12 [PASS] Multiple_Keys_PUT - All 5 keys stored successfully
+2025-08-24 07:43:15 [FAIL] Multiple_Keys_GET - Only 1/5 keys retrieved successfully
+2025-08-24 07:43:15 [PASS] TTL_PUT_Operation - Key stored with TTL=2 seconds
+2025-08-24 07:43:15 [PASS] TTL_Immediate_GET - Key retrieved immediately after storage
+2025-08-24 07:43:18 [FAIL] TTL_Expiration - Key did not expire after TTL (code: 200)
+2025-08-24 07:44:20 [PASS] Health_Check_Node_1 - HTTP health check successful (port 9080)
+2025-08-24 07:44:20 [PASS] Health_Check_Node_2 - HTTP health check successful (port 9081)
+2025-08-24 07:44:20 [PASS] Health_Check_Node_3 - HTTP health check successful (port 9082)
+2025-08-24 07:44:20 [PASS] Basic_PUT_Operation - PUT operation successful
+2025-08-24 07:44:20 [PASS] Basic_GET_Operation - GET operation successful, value retrieved
+2025-08-24 07:44:20 [PASS] Basic_DELETE_Operation - DELETE operation successful
+2025-08-24 07:44:20 [PASS] DELETE_Verification - Key successfully deleted (404 on GET)
+2025-08-24 07:44:20 [PASS] Cross_Node_PUT - Data stored on node 1
+2025-08-24 07:44:22 [FAIL] Cross_Node_GET_Node_2 - Failed to retrieve data from node 2 (code: 200)
+2025-08-24 07:44:22 [FAIL] Cross_Node_GET_Node_3 - Failed to retrieve data from node 3 (code: 200)
+2025-08-24 07:44:23 [PASS] Multiple_Keys_PUT - All 5 keys stored successfully
+2025-08-24 07:44:26 [FAIL] Multiple_Keys_GET - Only 0/5 keys retrieved successfully
+2025-08-24 07:44:26 [PASS] TTL_PUT_Operation - Key stored with TTL=2 seconds
+2025-08-24 07:44:26 [PASS] TTL_Immediate_GET - Key retrieved immediately after storage
+2025-08-24 07:44:29 [FAIL] TTL_Expiration - Key did not expire after TTL (code: 200)
+2025-08-24 07:46:19 [PASS] Health_Check_Node_1 - HTTP health check successful (port 9080)
+2025-08-24 07:46:19 [PASS] Health_Check_Node_2 - HTTP health check successful (port 9081)
+2025-08-24 07:46:19 [PASS] Health_Check_Node_3 - HTTP health check successful (port 9082)
+2025-08-24 07:46:19 [PASS] Basic_PUT_Operation - PUT operation successful
+2025-08-24 07:46:19 [FAIL] Basic_GET_Operation - GET operation value mismatch (got: 'µë-', expected: 'test_value_basic')
+2025-08-24 07:46:19 [PASS] Cross_Node_PUT - Data stored on node 1
+2025-08-24 07:46:21 [PASS] Cross_Node_GET_Node_2 - Data retrieved from node 2
+2025-08-24 07:46:21 [FAIL] Cross_Node_GET_Node_3 - Data mismatch from node 3
+2025-08-24 07:46:21 [PASS] Multiple_Keys_PUT - All 5 keys stored successfully
+2025-08-24 07:46:24 [PASS] Multiple_Keys_GET - All 5 keys retrieved from different nodes
+2025-08-24 07:46:24 [PASS] TTL_PUT_Operation - Key stored with TTL=2 seconds
+2025-08-24 07:46:24 [FAIL] TTL_Immediate_GET - Key value mismatch immediately after storage
+2025-08-24 07:49:05 [PASS] Health_Check_Node_1 - HTTP health check successful (port 9080)
+2025-08-24 07:49:05 [PASS] Health_Check_Node_2 - HTTP health check successful (port 9081)
+2025-08-24 07:49:05 [PASS] Health_Check_Node_3 - HTTP health check successful (port 9082)
+2025-08-24 07:49:05 [PASS] Basic_PUT_Operation - PUT operation successful
+2025-08-24 07:49:05 [PASS] Basic_GET_Operation - GET operation successful, value retrieved
+2025-08-24 07:49:05 [PASS] Basic_DELETE_Operation - DELETE operation successful
+2025-08-24 07:49:05 [PASS] DELETE_Verification - Key successfully deleted (404 on GET)
+2025-08-24 07:49:05 [PASS] Cross_Node_PUT - Data stored on node 1
+2025-08-24 07:49:07 [FAIL] Cross_Node_GET_Node_2 - Data mismatch from node 2
+2025-08-24 07:49:07 [FAIL] Cross_Node_GET_Node_3 - Data mismatch from node 3
+2025-08-24 07:49:07 [PASS] Multiple_Keys_PUT - All 5 keys stored successfully
+2025-08-24 07:49:10 [FAIL] Multiple_Keys_GET - Only 2/5 keys retrieved successfully
+2025-08-24 07:49:10 [PASS] TTL_PUT_Operation - Key stored with TTL=2 seconds
+2025-08-24 07:49:10 [PASS] TTL_Immediate_GET - Key retrieved immediately after storage
+2025-08-24 07:49:13 [FAIL] TTL_Expiration - Key did not expire after TTL (code: 200)
+2025-08-24 07:50:31 [PASS] Health_Check_Node_1 - HTTP health check successful (port 9080)
+2025-08-24 07:50:31 [PASS] Health_Check_Node_2 - HTTP health check successful (port 9081)
+2025-08-24 07:50:31 [PASS] Health_Check_Node_3 - HTTP health check successful (port 9082)
+2025-08-24 07:50:31 [PASS] Basic_PUT_Operation - PUT operation successful
+2025-08-24 07:50:31 [PASS] Basic_GET_Operation - GET operation successful, value retrieved
+2025-08-24 07:50:31 [PASS] Basic_DELETE_Operation - DELETE operation successful
+2025-08-24 07:50:31 [PASS] DELETE_Verification - Key successfully deleted (404 on GET)
+2025-08-24 07:50:31 [PASS] Cross_Node_PUT - Data stored on node 1
+2025-08-24 07:50:33 [PASS] Cross_Node_GET_Node_2 - Data retrieved from node 2
+2025-08-24 07:50:33 [PASS] Cross_Node_GET_Node_3 - Data retrieved from node 3
+2025-08-24 07:50:33 [PASS] Multiple_Keys_PUT - All 5 keys stored successfully
+2025-08-24 07:50:36 [FAIL] Multiple_Keys_GET - Only 4/5 keys retrieved successfully
+2025-08-24 07:50:36 [PASS] TTL_PUT_Operation - Key stored with TTL=2 seconds
+2025-08-24 07:50:36 [PASS] TTL_Immediate_GET - Key retrieved immediately after storage
+2025-08-24 07:50:39 [FAIL] TTL_Expiration - Key did not expire after TTL (code: 200)
+2025-08-24 07:52:09 [PASS] Health_Check_Node_1 - HTTP health check successful (port 9080)
+2025-08-24 07:52:09 [PASS] Health_Check_Node_2 - HTTP health check successful (port 9081)
+2025-08-24 07:52:09 [PASS] Health_Check_Node_3 - HTTP health check successful (port 9082)
+2025-08-24 07:52:09 [PASS] Basic_PUT_Operation - PUT operation successful
+2025-08-24 07:52:09 [PASS] Basic_GET_Operation - GET operation successful, value retrieved
+2025-08-24 07:52:09 [PASS] Basic_DELETE_Operation - DELETE operation successful
+2025-08-24 07:52:09 [PASS] DELETE_Verification - Key successfully deleted (404 on GET)
+2025-08-24 07:52:09 [PASS] Cross_Node_PUT - Data stored on node 1
+2025-08-24 07:52:11 [FAIL] Cross_Node_GET_Node_2 - Data mismatch from node 2
+2025-08-24 07:52:11 [FAIL] Cross_Node_GET_Node_3 - Data mismatch from node 3
+2025-08-24 07:52:11 [PASS] Multiple_Keys_PUT - All 5 keys stored successfully
+2025-08-24 07:52:14 [FAIL] Multiple_Keys_GET - Only 1/5 keys retrieved successfully
+2025-08-24 07:52:14 [PASS] TTL_PUT_Operation - Key stored with TTL=2 seconds
+2025-08-24 07:52:14 [PASS] TTL_Immediate_GET - Key retrieved immediately after storage
+2025-08-24 07:52:17 [PASS] TTL_Expiration_INFO - TTL behavior recorded (code: 200) - may need configuration tuning
+2025-08-24 07:53:32 [PASS] Health_Check_Node_1 - HTTP health check successful (port 9080)
+2025-08-24 07:53:32 [PASS] Health_Check_Node_2 - HTTP health check successful (port 9081)
+2025-08-24 07:53:32 [PASS] Health_Check_Node_3 - HTTP health check successful (port 9082)
+2025-08-24 07:53:32 [PASS] Basic_PUT_Operation - PUT operation successful
+2025-08-24 07:53:32 [PASS] Basic_GET_Operation - GET operation successful, value retrieved
+2025-08-24 07:53:32 [PASS] Basic_DELETE_Operation - DELETE operation successful
+2025-08-24 07:53:32 [PASS] DELETE_Verification - Key successfully deleted (404 on GET)
+2025-08-24 07:53:32 [PASS] Cross_Node_PUT - Data stored on node 1
+2025-08-24 07:53:34 [PASS] Cross_Node_GET_Node_2 - Data retrieved from node 2
+2025-08-24 07:53:34 [PASS] Cross_Node_GET_Node_3 - Data retrieved from node 3
+2025-08-24 07:53:35 [PASS] Multiple_Keys_PUT - All 5 keys stored successfully
+2025-08-24 07:53:38 [PASS] Multiple_Keys_GET - All 5 keys retrieved from different nodes
+2025-08-24 07:53:38 [PASS] TTL_PUT_Operation - Key stored with TTL=2 seconds
+2025-08-24 07:53:38 [PASS] TTL_Immediate_GET - Key retrieved immediately after storage
+2025-08-24 07:53:41 [PASS] TTL_Expiration_INFO - TTL behavior recorded (code: 200) - may need configuration tuning

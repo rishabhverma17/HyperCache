@@ -1,0 +1,2 @@
+[1;33mDebug: TTL test after expiration: code=200, body='{"correlation_id":"5c6c5bb0-3295-4bc4-ae87-71444354cc35","data":{"key":"ttl_test_key","value":"ttl_test_value"},"local":true,"node":"node-1","success":true}
+'[0m
