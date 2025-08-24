@@ -1,0 +1,50 @@
+{
+  "ref": "refs/heads/main",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "1234567890123456789012345678901234567890",
+  "repository": {
+    "name": "HyperCache",
+    "full_name": "rishabhverma17/HyperCache",
+    "owner": {
+      "name": "rishabhverma17",
+      "login": "rishabhverma17"
+    },
+    "default_branch": "main"
+  },
+  "pusher": {
+    "name": "rishabhverma17",
+    "email": "user@example.com"
+  },
+  "sender": {
+    "login": "rishabhverma17",
+    "type": "User"
+  },
+  "head_commit": {
+    "id": "1234567890123456789012345678901234567890",
+    "message": "Test local CI execution with dynamic validation",
+    "timestamp": "2025-08-24T22:20:00Z",
+    "author": {
+      "name": "rishabhverma17",
+      "email": "user@example.com"
+    },
+    "committer": {
+      "name": "rishabhverma17", 
+      "email": "user@example.com"
+    }
+  },
+  "commits": [
+    {
+      "id": "1234567890123456789012345678901234567890",
+      "message": "Test local CI execution with dynamic validation",
+      "timestamp": "2025-08-24T22:20:00Z",
+      "author": {
+        "name": "rishabhverma17",
+        "email": "user@example.com"
+      },
+      "committer": {
+        "name": "rishabhverma17",
+        "email": "user@example.com"
+      }
+    }
+  ]
+}

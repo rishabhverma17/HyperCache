@@ -312,7 +312,7 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 	if s.memPool.AvailableSpace() < int64(size) {
 		// Try to evict some items to make space
 		if evictErr := s.evictForSpace(size); evictErr != nil {
-			s.incrementErrorCount()
+			s.incrementErrorCountUnsafe()
 			return fmt.Errorf("insufficient memory: need %d bytes, available %d", size, s.memPool.AvailableSpace())
 		}
 	}
@@ -320,7 +320,7 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 	// Allocate memory for the serialized data
 	allocatedMemory, err := s.memPool.Allocate(int64(size))
 	if err != nil {
-		s.incrementErrorCount()
+		s.incrementErrorCountUnsafe()
 		return fmt.Errorf("failed to allocate memory: %w", err)
 	}
 
@@ -725,6 +725,11 @@ func (s *BasicStore) incrementErrorCount() {
 	s.mutex.Lock()
 	s.stats.ErrorCount++
 	s.mutex.Unlock()
+}
+
+// incrementErrorCountUnsafe increments error count without locking (caller must hold lock)
+func (s *BasicStore) incrementErrorCountUnsafe() {
+	s.stats.ErrorCount++
 }
 
 // itemToEntry converts a CacheItem to an Entry for the eviction policy

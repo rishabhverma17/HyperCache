@@ -53,7 +53,7 @@ stores:
 
 # Logging Configuration
 logging:
-  level: "info"             # Standard logging for node 2
+  level: "debug"            # Debug logging for node 2 (for Cuckoo filter logs)
   enable_console: true       # Enable console output
   enable_file: true         # Enable file output
   log_dir: "logs"           # Log directory

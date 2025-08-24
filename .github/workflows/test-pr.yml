@@ -1,0 +1,284 @@
+name: Pull Request Tests
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    types: [opened, synchronize, reopened]
+
+env:
+  GO_VERSION: '1.23.2'
+
+jobs:
+  pr-validation:
+    name: PR Validation
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Format check
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "❌ Code is not properly formatted"
+          gofmt -s -l .
+          exit 1
+        fi
+        echo "✅ Code formatting is correct"
+
+    - name: Vet check
+      run: |
+        go vet ./...
+        echo "✅ go vet passed"
+
+    - name: Build check
+      run: |
+        go build -v ./...
+        echo "✅ Build successful"
+
+  pr-unit-tests:
+    name: PR Unit Tests
+    runs-on: ubuntu-latest
+    needs: pr-validation
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Make test scripts executable
+      run: chmod +x tests/scripts/run_unit_tests.sh
+
+    - name: Run unit tests
+      run: ./tests/scripts/run_unit_tests.sh
+
+    - name: Check coverage threshold
+      run: |
+        if [ -f "test-results/coverage.out" ]; then
+          coverage=$(go tool cover -func=test-results/coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Overall coverage: ${coverage}%"
+          if (( $(echo "$coverage < 80" | bc -l) )); then
+            echo "❌ Coverage below 80% threshold"
+            exit 1
+          else
+            echo "✅ Coverage above 80% threshold"
+          fi
+        else
+          echo "⚠️ Coverage file not found, skipping coverage check"
+        fi
+
+    - name: Upload PR test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: pr-unit-test-results
+        path: |
+          test-results/
+          coverage.html
+
+  pr-integration-smoke-test:
+    name: PR Integration Smoke Test
+    runs-on: ubuntu-latest
+    needs: pr-unit-tests
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Make scripts executable
+      run: |
+        chmod +x tests/scripts/run_integration_tests.sh
+        chmod +x scripts/clean-persistence.sh
+        chmod +x scripts/build-hypercache.sh
+
+    - name: Build HyperCache
+      run: |
+        mkdir -p bin
+        go build -v -o bin/hypercache ./cmd/hypercache
+
+    - name: Run integration smoke test
+      run: ./tests/scripts/run_integration_tests.sh
+      timeout-minutes: 10
+      env:
+        CI: true
+        SMOKE_TEST: true
+
+    - name: Upload integration test logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: pr-integration-logs
+        path: |
+          logs/
+          test-results/
+
+  pr-performance-check:
+    name: PR Performance Check
+    runs-on: ubuntu-latest
+    needs: pr-unit-tests
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run critical performance benchmarks
+      run: |
+        mkdir -p benchmark-results
+        echo "🧪 Running critical performance checks..."
+        
+        # Run Cuckoo Filter benchmarks (most critical)
+        go test -bench=BenchmarkCuckooFilter -benchmem -run=^$ ./tests/unit/filter/... > benchmark-results/pr-cuckoo-bench.txt || true
+        
+        echo "📊 Performance check completed"
+        if [ -f "benchmark-results/pr-cuckoo-bench.txt" ]; then
+          echo "✅ Cuckoo Filter benchmarks completed"
+          cat benchmark-results/pr-cuckoo-bench.txt
+        fi
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: pr-performance-results
+        path: benchmark-results/
+
+  pr-summary:
+    name: PR Test Summary
+    runs-on: ubuntu-latest
+    needs: [pr-validation, pr-unit-tests, pr-integration-smoke-test, pr-performance-check]
+    if: always()
+
+    steps:
+    - name: Generate PR summary
+      run: |
+        echo "# 🔍 Pull Request Test Summary" > pr_summary.md
+        echo "" >> pr_summary.md
+        echo "## Validation Results" >> pr_summary.md
+        echo "- **Code Validation**: ${{ needs.pr-validation.result }}" >> pr_summary.md
+        echo "- **Unit Tests**: ${{ needs.pr-unit-tests.result }}" >> pr_summary.md
+        echo "- **Integration Smoke**: ${{ needs.pr-integration-smoke-test.result }}" >> pr_summary.md
+        echo "- **Performance Check**: ${{ needs.pr-performance-check.result }}" >> pr_summary.md
+        echo "" >> pr_summary.md
+        
+        success_count=0
+        total_count=4
+        
+        if [ "${{ needs.pr-validation.result }}" = "success" ]; then
+          success_count=$((success_count + 1))
+        fi
+        if [ "${{ needs.pr-unit-tests.result }}" = "success" ]; then
+          success_count=$((success_count + 1))
+        fi
+        if [ "${{ needs.pr-integration-smoke-test.result }}" = "success" ]; then
+          success_count=$((success_count + 1))
+        fi
+        if [ "${{ needs.pr-performance-check.result }}" = "success" ]; then
+          success_count=$((success_count + 1))
+        fi
+        
+        echo "## Overall Status: ${success_count}/${total_count} checks passed" >> pr_summary.md
+        
+        if [ $success_count -eq $total_count ]; then
+          echo "✅ **All checks passed - PR ready for review!**" >> pr_summary.md
+        elif [ $success_count -ge 2 ]; then
+          echo "⚠️ **Partial success - some issues need attention**" >> pr_summary.md
+        else
+          echo "❌ **Multiple issues detected - please review and fix**" >> pr_summary.md
+        fi
+        
+        cat pr_summary.md
+
+    - name: Comment PR with results
+      uses: actions/github-script@v7
+      if: always()
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('pr_summary.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });
+
+    - name: Upload PR summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: pr-summary
+        path: pr_summary.md

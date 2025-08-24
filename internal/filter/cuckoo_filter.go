@@ -87,7 +87,7 @@ func NewCuckooFilter(config *FilterConfig) (*CuckooFilter, error) {
 	}
 
 	// Calculate number of buckets needed
-	loadFactor := 0.95 // 95% load factor for good performance
+	loadFactor := 0.85 // 85% load factor to reduce collisions and improve FPR
 	numBuckets := uint64(math.Ceil(float64(config.ExpectedItems) / (float64(config.BucketSize) * loadFactor)))
 
 	// Ensure power of 2 for efficient modulo operations
@@ -332,7 +332,11 @@ func (cf *CuckooFilter) hash(key []byte) uint64 {
 
 // fingerprint extracts a fingerprint from the hash
 func (cf *CuckooFilter) fingerprint(hash uint64) uint32 {
-	return uint32(hash) & cf.fingerprintMask
+	// Use upper bits for fingerprint to avoid correlation with bucket index
+	// Apply additional mixing to improve hash quality
+	fp := uint32(hash >> 32) // Use upper 32 bits
+	fp ^= uint32(hash)       // XOR with lower 32 bits for mixing
+	return fp & cf.fingerprintMask
 }
 
 // bucketIndex calculates the bucket index from hash
@@ -342,8 +346,15 @@ func (cf *CuckooFilter) bucketIndex(hash uint64) uint64 {
 
 // altBucketIndex calculates the alternative bucket index
 func (cf *CuckooFilter) altBucketIndex(bucketIdx uint64, fingerprint uint32) uint64 {
-	// Use fingerprint to calculate alternative position
-	altHash := uint64(fingerprint) * 0x5bd1e995 // MurmurHash constant
+	// Improved hash mixing to reduce clustering
+	// Use a different hash function for alternative bucket calculation
+	altHash := uint64(fingerprint)
+	altHash ^= altHash >> 16
+	altHash *= 0x85ebca6b  // Different constant than MurmurHash
+	altHash ^= altHash >> 13
+	altHash *= 0xc2b2ae35  // Second mixing constant
+	altHash ^= altHash >> 16
+	
 	return (bucketIdx ^ altHash) % cf.numBuckets
 }
 
