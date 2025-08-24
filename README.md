@@ -1,5 +1,8 @@
 # HyperCache - Distributed Cache
 
+<img src="./logo/HyperCache-logo-transparent.png" alt="HyperCache Logo" width="200" height="auto">
+
+[![Static Badge](https://img.shields.io/badge/HyperCache-Active_Development-blue)]()
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)]()
 [![Go Version](https://img.shields.io/badge/Go-1.23.2-blue)]()
 [![Redis Compatible](https://img.shields.io/badge/Redis-Compatible-red)]()
