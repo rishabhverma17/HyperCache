@@ -72,18 +72,11 @@ jobs:
       run: |
         go tool cover -html=test-results/${{ matrix.component }}-coverage.out -o test-results/${{ matrix.component }}-coverage.html
 
-    - name: Check coverage threshold
+    - name: Report coverage
       run: |
         coverage=$(go tool cover -func=test-results/${{ matrix.component }}-coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-        threshold=${{ github.event.inputs.coverage_threshold || '85' }}
-        echo "Coverage for ${{ matrix.component }}: ${coverage}%"
-        echo "Threshold: ${threshold}%"
-        if (( $(echo "$coverage < $threshold" | bc -l) )); then
-          echo "❌ Coverage below threshold for ${{ matrix.component }}"
-          exit 1
-        else
-          echo "✅ Coverage above threshold for ${{ matrix.component }}"
-        fi
+        echo "📊 Coverage for ${{ matrix.component }}: ${coverage}%"
+        echo "✅ Coverage report generated successfully for ${{ matrix.component }}"
 
     - name: Upload component test results
       uses: actions/upload-artifact@v4

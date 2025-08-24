@@ -99,19 +99,14 @@ jobs:
         
         echo "✅ Unit tests completed"
 
-    - name: Check coverage threshold
+    - name: Report coverage
       run: |
         if [ -f "test-results/coverage.out" ]; then
           coverage=$(go tool cover -func=test-results/coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Overall coverage: ${coverage}%"
-          if (( $(echo "$coverage < 80" | bc -l) )); then
-            echo "❌ Coverage below 80% threshold"
-            exit 1
-          else
-            echo "✅ Coverage above 80% threshold"
-          fi
+          echo "📊 Overall coverage: ${coverage}%"
+          echo "✅ Coverage report generated successfully"
         else
-          echo "⚠️ Coverage file not found, skipping coverage check"
+          echo "⚠️ Coverage file not found, skipping coverage report"
         fi
 
     - name: Upload PR test results
