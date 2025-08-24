@@ -306,8 +306,10 @@ main() {
     
     if [[ "$overall_success" == "true" ]]; then
         log "🎉 All executed integration tests completed successfully!"
+        exit 0
     else
         warn "⚠️  Some integration tests failed. Check the summary above for details."
+        exit 1
     fi
 }
 
