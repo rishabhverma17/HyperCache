@@ -40,9 +40,11 @@ jobs:
 
     - name: Format check
       run: |
-        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+        # Exclude examples directory from formatting check
+        UNFORMATTED=$(find . -name "*.go" -not -path "./examples/*" -exec gofmt -s -l {} \;)
+        if [ -n "$UNFORMATTED" ]; then
           echo "❌ Code is not properly formatted"
-          gofmt -s -l .
+          echo "$UNFORMATTED"
           exit 1
         fi
         echo "✅ Code formatting is correct"

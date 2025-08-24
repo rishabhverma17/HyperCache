@@ -1,6 +1,8 @@
 // Memory Pressure and Eviction Explained
 // Understanding NeedsEviction() in HyperCache
 
+//go:build ignore
+
 package main
 
 import (

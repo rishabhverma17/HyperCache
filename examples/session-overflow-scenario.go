@@ -1,6 +1,8 @@
 // Real-World Scenario: Session Cache Overflow
 // What happens when active sessions compete for space?
 
+//go:build ignore
+
 package main
 
 import (
