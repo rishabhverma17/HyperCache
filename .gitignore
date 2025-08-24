@@ -109,6 +109,7 @@ docs/session-overflow-scenario.go
 
 # Test Results
 test-results/
+integration-test-results/
 
 # Benchmark Results
 benchmark-results/

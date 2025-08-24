@@ -210,7 +210,12 @@ run_tests() {
     
     if [ -f "./scripts/test-bench.sh" ]; then
         echo -e "${YELLOW}Running unified test and benchmark script...${NC}"
-        ./scripts/test-bench.sh test
+        ./scripts/test-bench.sh test all
+    fi
+    
+    if [ -f "./scripts/integration-tests.sh" ]; then
+        echo -e "${YELLOW}Running integration tests for sanity checks...${NC}"
+        ./scripts/integration-tests.sh
     fi
 }
 

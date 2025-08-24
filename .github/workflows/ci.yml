@@ -39,6 +39,9 @@ jobs:
     - name: Verify dependencies
       run: go mod verify
 
+    - name: Run unit tests
+      run: go test ./internal/... -v
+
     - name: Build binary
       run: |
         mkdir -p bin
@@ -48,6 +51,22 @@ jobs:
       run: |
         chmod +x bin/hypercache
         timeout 10s ./bin/hypercache --help || true
+
+    - name: Run integration tests
+      run: |
+        chmod +x scripts/integration-tests.sh
+        ./scripts/integration-tests.sh
+      timeout-minutes: 10
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: |
+          integration-test-results/
+          test-results/
+        retention-days: 7
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -67,6 +86,8 @@ jobs:
       run: |
         echo "🎉 HyperCache CI pipeline completed successfully!"
         echo "✅ Build successful"
+        echo "✅ Unit tests passed"
+        echo "✅ Integration tests passed"
 
     - name: Notify failure
       if: ${{ needs.build.result == 'failure' }}
