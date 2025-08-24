@@ -1,0 +1,57 @@
+# HyperCache Configuration for Testing
+# Version 1.0 - Multi-Node Testing Configuration
+
+# Node Configuration
+node:
+  # ID will be set via command line
+  id: "hypercache-node-test"
+  # Bind address will be set via command line
+  bind_addr: "127.0.0.1:8080"
+  data_dir: "./data/node-3"
+
+# Cluster Configuration  
+cluster:
+  seeds: ["127.0.0.1:7946"]
+  replication_factor: 3
+  consistency_level: "eventual"
+
+# Storage Engine Configuration
+storage:
+  wal_sync_interval: "10ms"
+  memtable_size: "64MB"
+  compaction_threads: 4
+  
+# Persistence Configuration
+persistence:
+  enabled: true
+  strategy: "hybrid"
+  enable_aof: true
+  sync_policy: "everysec"
+  sync_interval: "1s"
+  snapshot_interval: "5m"
+  max_log_size: "100MB"
+  compression_level: 6
+  retain_logs: 3
+
+# Global Cache Configuration
+cache:
+  max_memory: "1GB"
+  default_ttl: "1h"
+  cuckoo_filter_fpp: 0.01
+
+# Store Configurations
+stores:
+  - name: "default"
+    eviction_policy: "lru"
+    max_memory: "512MB"
+    default_ttl: "1h"
+    
+  - name: "sessions"
+    eviction_policy: "ttl"
+    max_memory: "256MB" 
+    default_ttl: "30m"
+    
+  - name: "test_data"
+    eviction_policy: "lru"
+    max_memory: "256MB"
+    default_ttl: "24h"
