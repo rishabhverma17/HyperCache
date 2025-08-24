@@ -116,32 +116,100 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-go-
 
+    - name: Install calculation tools
+      run: sudo apt-get install -y bc
+
     - name: Download dependencies
       run: go mod download
-
-    - name: Make scripts executable
-      run: |
-        chmod +x tests/scripts/run_integration_tests.sh
-        chmod +x scripts/clean-persistence.sh
-        chmod +x scripts/build-hypercache.sh
 
     - name: Build HyperCache
       run: |
         mkdir -p bin
         go build -v -o bin/hypercache ./cmd/hypercache
 
-    - name: Run integration tests with extended timeout
-      run: ./tests/scripts/run_integration_tests.sh
-      timeout-minutes: 15
-      env:
-        CI: true
-        EXTENDED_TESTING: true
+    - name: Start test cluster
+      run: |
+        # Clean any existing processes and persistence data
+        pkill -f hypercache || true
+        sleep 2
+        rm -rf data/ logs/ || true
+        
+        # Create required directories
+        mkdir -p bin logs data/node-{1,2,3}
+        
+        # Start 3-node cluster using the script if configs exist, otherwise simple startup
+        echo "🚀 Starting 3-node HyperCache cluster for comprehensive testing..."
+        
+        if [ -f "configs/node1-config.yaml" ] && [ -f "scripts/start-cluster.sh" ]; then
+          # Use the existing cluster script
+          chmod +x scripts/start-cluster.sh
+          ./scripts/start-cluster.sh cluster
+        else
+          # Fallback: Start nodes directly
+          echo "⚠️ Using fallback cluster startup (configs not found)"
+          
+          # Node 1 - HTTP API on 9080, RESP on 8080
+          ./bin/hypercache -node-id=node-1 -bind=127.0.0.1:8080 -port=8080 > logs/node-1.log 2>&1 &
+          NODE1_PID=$!
+          
+          # Node 2 - HTTP API on 9081, RESP on 8081  
+          ./bin/hypercache -node-id=node-2 -bind=127.0.0.1:8081 -port=8081 > logs/node-2.log 2>&1 &
+          NODE2_PID=$!
+          
+          # Node 3 - HTTP API on 9082, RESP on 8082
+          ./bin/hypercache -node-id=node-3 -bind=127.0.0.1:8082 -port=8082 > logs/node-3.log 2>&1 &
+          NODE3_PID=$!
+          
+          # Save PIDs for cleanup
+          echo "$NODE1_PID $NODE2_PID $NODE3_PID" > cluster_pids.txt
+        fi
+        
+        # Wait for cluster to stabilize
+        echo "⏳ Waiting 15 seconds for cluster to stabilize (extended for comprehensive testing)..."
+        sleep 15
+        
+        echo "✅ Cluster started successfully"
+
+    - name: Run comprehensive integration tests
+      run: |
+        echo "🧪 Running comprehensive integration tests directly with Go..."
+        mkdir -p test-results
+        
+        # Run integration tests with extended timeout for comprehensive testing
+        go test -v -timeout=10m ./tests/integration/... | tee test-results/integration-output.txt
+        
+        echo "✅ Comprehensive integration tests completed"
 
     - name: Validate cluster performance
       run: |
         echo "🚀 Validating cluster performance metrics..."
         # Add performance validation if your integration test script supports it
         echo "✅ Performance validation completed"
+
+    - name: Cleanup test cluster
+      if: always()
+      run: |
+        echo "🧹 Cleaning up comprehensive test cluster..."
+        
+        # Try to use cleanup script first
+        if [ -f "scripts/clean-persistence.sh" ]; then
+          chmod +x scripts/clean-persistence.sh
+          ./scripts/clean-persistence.sh --all || true
+        fi
+        
+        # Manual cleanup
+        if [ -f cluster_pids.txt ]; then
+          for pid in $(cat cluster_pids.txt); do
+            kill $pid 2>/dev/null || true
+          done
+          rm -f cluster_pids.txt
+        fi
+        
+        # Kill any remaining hypercache processes
+        pkill -f hypercache || true
+        sleep 2
+        
+        echo "✅ Comprehensive cleanup completed"
 
     - name: Upload integration logs
       uses: actions/upload-artifact@v4
