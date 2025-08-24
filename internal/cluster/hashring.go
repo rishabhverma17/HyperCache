@@ -47,20 +47,20 @@ type Node struct {
 	Address  string
 	Port     int
 	Status   NodeStatus
-	Load     float64   // Current load metric (0.0 - 1.0)
+	Load     float64 // Current load metric (0.0 - 1.0)
 	LastSeen time.Time
-	
+
 	// Node capabilities
-	SupportsFilters    bool
+	SupportsFilters     bool
 	SupportsCompression bool
-	SupportsTLS        bool
+	SupportsTLS         bool
 }
 
 // VirtualNode represents a virtual node on the hash ring
 type VirtualNode struct {
-	Hash     uint64 // Position on the ring
-	NodeID   string // Physical node identifier
-	VNodeID  int    // Virtual node number (0, 1, 2, ...)
+	Hash    uint64 // Position on the ring
+	NodeID  string // Physical node identifier
+	VNodeID int    // Virtual node number (0, 1, 2, ...)
 }
 
 // HashRingConfig holds configuration for the hash ring
@@ -76,8 +76,8 @@ type HashRingConfig struct {
 // DefaultHashRingConfig returns a production-ready default configuration
 func DefaultHashRingConfig() HashRingConfig {
 	return HashRingConfig{
-		VirtualNodeCount:     256,  // Good balance of distribution and memory usage
-		ReplicationFactor:    3,    // Standard fault tolerance
+		VirtualNodeCount:     256, // Good balance of distribution and memory usage
+		ReplicationFactor:    3,   // Standard fault tolerance
 		HashFunction:         "xxhash64",
 		LookupCacheSize:      10000, // Cache for hot keys
 		HealthCheckInterval:  30,    // 30 seconds
@@ -88,21 +88,21 @@ func DefaultHashRingConfig() HashRingConfig {
 // HashRing implements consistent hashing with virtual nodes
 type HashRing struct {
 	// Core ring state
-	vnodes        []VirtualNode     // Sorted by hash value
-	nodes         map[string]*Node  // Physical nodes in cluster
-	config        HashRingConfig
-	
+	vnodes []VirtualNode    // Sorted by hash value
+	nodes  map[string]*Node // Physical nodes in cluster
+	config HashRingConfig
+
 	// Performance optimizations
-	lookupCache   map[string][]string // Cache: key -> replica nodes
-	cacheKeys     []string            // LRU cache keys
-	cacheIndex    int                 // Current cache position for LRU
-	
+	lookupCache map[string][]string // Cache: key -> replica nodes
+	cacheKeys   []string            // LRU cache keys
+	cacheIndex  int                 // Current cache position for LRU
+
 	// Thread safety
 	mu sync.RWMutex
-	
+
 	// Metrics
-	lookupCount   int64
-	cacheHitCount int64
+	lookupCount    int64
+	cacheHitCount  int64
 	rebalanceCount int64
 }
 
@@ -135,12 +135,12 @@ func (ring *HashRing) hashFunction(data []byte) uint64 {
 func (ring *HashRing) AddNode(nodeID, address string, port int) error {
 	ring.mu.Lock()
 	defer ring.mu.Unlock()
-	
+
 	// Check if node already exists
 	if _, exists := ring.nodes[nodeID]; exists {
 		return fmt.Errorf("node %s already exists", nodeID)
 	}
-	
+
 	// Add physical node
 	ring.nodes[nodeID] = &Node{
 		ID:       nodeID,
@@ -149,35 +149,35 @@ func (ring *HashRing) AddNode(nodeID, address string, port int) error {
 		Status:   NodeAlive,
 		Load:     0.0,
 		LastSeen: time.Now(),
-		
+
 		// Default capabilities
-		SupportsFilters:    true,
+		SupportsFilters:     true,
 		SupportsCompression: true,
-		SupportsTLS:        false,
+		SupportsTLS:         false,
 	}
-	
+
 	// Create virtual nodes
 	newVNodes := make([]VirtualNode, ring.config.VirtualNodeCount)
 	for i := 0; i < ring.config.VirtualNodeCount; i++ {
 		vNodeKey := fmt.Sprintf("%s:%d", nodeID, i)
 		hash := ring.hashFunction([]byte(vNodeKey))
-		
+
 		newVNodes[i] = VirtualNode{
 			Hash:    hash,
 			NodeID:  nodeID,
 			VNodeID: i,
 		}
 	}
-	
+
 	// Insert virtual nodes and maintain sorted order
 	ring.vnodes = append(ring.vnodes, newVNodes...)
 	sort.Slice(ring.vnodes, func(i, j int) bool {
 		return ring.vnodes[i].Hash < ring.vnodes[j].Hash
 	})
-	
+
 	// Clear lookup cache (ring topology changed)
 	ring.clearLookupCache()
-	
+
 	return nil
 }
 
@@ -185,15 +185,15 @@ func (ring *HashRing) AddNode(nodeID, address string, port int) error {
 func (ring *HashRing) RemoveNode(nodeID string) error {
 	ring.mu.Lock()
 	defer ring.mu.Unlock()
-	
+
 	// Check if node exists
 	if _, exists := ring.nodes[nodeID]; !exists {
 		return fmt.Errorf("node %s does not exist", nodeID)
 	}
-	
+
 	// Remove physical node
 	delete(ring.nodes, nodeID)
-	
+
 	// Remove virtual nodes
 	filteredVNodes := make([]VirtualNode, 0, len(ring.vnodes))
 	for _, vnode := range ring.vnodes {
@@ -202,10 +202,10 @@ func (ring *HashRing) RemoveNode(nodeID string) error {
 		}
 	}
 	ring.vnodes = filteredVNodes
-	
+
 	// Clear lookup cache
 	ring.clearLookupCache()
-	
+
 	return nil
 }
 
@@ -214,7 +214,7 @@ func (ring *HashRing) GetNode(key string) string {
 	ring.mu.Lock()
 	ring.lookupCount++
 	ring.mu.Unlock()
-	
+
 	replicas := ring.GetReplicas(key, 1)
 	if len(replicas) == 0 {
 		return ""
@@ -226,12 +226,12 @@ func (ring *HashRing) GetNode(key string) string {
 func (ring *HashRing) GetReplicas(key string, count int) []string {
 	ring.mu.Lock()
 	ring.lookupCount++
-	
+
 	// Check cache first
 	if cached, exists := ring.lookupCache[key]; exists {
 		ring.cacheHitCount++
 		ring.mu.Unlock()
-		
+
 		// Return requested number of replicas
 		if count >= len(cached) {
 			return cached
@@ -239,15 +239,15 @@ func (ring *HashRing) GetReplicas(key string, count int) []string {
 		return cached[:count]
 	}
 	ring.mu.Unlock()
-	
+
 	// Compute replicas
 	replicas := ring.computeReplicas(key, ring.config.ReplicationFactor)
-	
+
 	// Cache the result
 	ring.mu.Lock()
 	ring.cacheLookupResult(key, replicas)
 	ring.mu.Unlock()
-	
+
 	// Return requested number
 	if count >= len(replicas) {
 		return replicas
@@ -259,39 +259,39 @@ func (ring *HashRing) GetReplicas(key string, count int) []string {
 func (ring *HashRing) computeReplicas(key string, count int) []string {
 	ring.mu.RLock()
 	defer ring.mu.RUnlock()
-	
+
 	if len(ring.vnodes) == 0 || count == 0 {
 		return nil
 	}
-	
+
 	// Hash the key to find position on ring
 	keyHash := ring.hashFunction([]byte(key))
-	
+
 	// Find starting position using binary search
 	startIdx := sort.Search(len(ring.vnodes), func(i int) bool {
 		return ring.vnodes[i].Hash >= keyHash
 	})
-	
+
 	// Wrap around if necessary
 	if startIdx == len(ring.vnodes) {
 		startIdx = 0
 	}
-	
+
 	// Collect unique physical nodes
 	seen := make(map[string]bool)
 	replicas := make([]string, 0, count)
-	
+
 	for i := 0; i < len(ring.vnodes) && len(replicas) < count; i++ {
 		idx := (startIdx + i) % len(ring.vnodes)
 		nodeID := ring.vnodes[idx].NodeID
-		
+
 		// Only include alive nodes and avoid duplicates
 		if node, exists := ring.nodes[nodeID]; exists && node.Status == NodeAlive && !seen[nodeID] {
 			seen[nodeID] = true
 			replicas = append(replicas, nodeID)
 		}
 	}
-	
+
 	return replicas
 }
 
@@ -303,11 +303,11 @@ func (ring *HashRing) cacheLookupResult(key string, replicas []string) {
 		if oldKey != "" {
 			delete(ring.lookupCache, oldKey)
 		}
-		
+
 		ring.cacheKeys[ring.cacheIndex] = key
 		ring.cacheIndex = (ring.cacheIndex + 1) % len(ring.cacheKeys)
 	}
-	
+
 	ring.lookupCache[key] = replicas
 }
 
@@ -324,7 +324,7 @@ func (ring *HashRing) clearLookupCache() {
 func (ring *HashRing) GetNodes() map[string]*Node {
 	ring.mu.RLock()
 	defer ring.mu.RUnlock()
-	
+
 	// Return a copy to prevent external modifications
 	nodesCopy := make(map[string]*Node)
 	for id, node := range ring.nodes {
@@ -335,13 +335,13 @@ func (ring *HashRing) GetNodes() map[string]*Node {
 			Status:   node.Status,
 			Load:     node.Load,
 			LastSeen: node.LastSeen,
-			
-			SupportsFilters:    node.SupportsFilters,
+
+			SupportsFilters:     node.SupportsFilters,
 			SupportsCompression: node.SupportsCompression,
-			SupportsTLS:        node.SupportsTLS,
+			SupportsTLS:         node.SupportsTLS,
 		}
 	}
-	
+
 	return nodesCopy
 }
 
@@ -349,22 +349,22 @@ func (ring *HashRing) GetNodes() map[string]*Node {
 func (ring *HashRing) SetNodeStatus(nodeID string, status NodeStatus) error {
 	ring.mu.Lock()
 	defer ring.mu.Unlock()
-	
+
 	node, exists := ring.nodes[nodeID]
 	if !exists {
 		return fmt.Errorf("node %s does not exist", nodeID)
 	}
-	
+
 	oldStatus := node.Status
 	node.Status = status
 	node.LastSeen = time.Now()
-	
+
 	// Clear cache if node status affects availability
-	if (oldStatus == NodeAlive && status != NodeAlive) || 
-	   (oldStatus != NodeAlive && status == NodeAlive) {
+	if (oldStatus == NodeAlive && status != NodeAlive) ||
+		(oldStatus != NodeAlive && status == NodeAlive) {
 		ring.clearLookupCache()
 	}
-	
+
 	return nil
 }
 
@@ -372,33 +372,33 @@ func (ring *HashRing) SetNodeStatus(nodeID string, status NodeStatus) error {
 func (ring *HashRing) UpdateNodeLoad(nodeID string, load float64) error {
 	ring.mu.Lock()
 	defer ring.mu.Unlock()
-	
+
 	node, exists := ring.nodes[nodeID]
 	if !exists {
 		return fmt.Errorf("node %s does not exist", nodeID)
 	}
-	
+
 	node.Load = math.Max(0.0, math.Min(1.0, load)) // Clamp to [0, 1]
 	node.LastSeen = time.Now()
-	
+
 	return nil
 }
 
 // DistributionStats provides statistics about key distribution
 type DistributionStats struct {
-	NodeLoads     map[string]int // Keys per node
-	TotalKeys     int            // Total number of keys analyzed
-	MinLoad       int            // Minimum keys on any node
-	MaxLoad       int            // Maximum keys on any node
-	AvgLoad       float64        // Average keys per node
-	StdDeviation  float64        // Standard deviation of loads
-	LoadFactor    float64        // MaxLoad / AvgLoad
+	NodeLoads    map[string]int // Keys per node
+	TotalKeys    int            // Total number of keys analyzed
+	MinLoad      int            // Minimum keys on any node
+	MaxLoad      int            // Maximum keys on any node
+	AvgLoad      float64        // Average keys per node
+	StdDeviation float64        // Standard deviation of loads
+	LoadFactor   float64        // MaxLoad / AvgLoad
 }
 
 // AnalyzeDistribution analyzes the distribution quality for a set of test keys
 func (ring *HashRing) AnalyzeDistribution(testKeys []string) DistributionStats {
 	nodeLoads := make(map[string]int)
-	
+
 	// Count keys per node
 	for _, key := range testKeys {
 		node := ring.GetNode(key)
@@ -406,14 +406,14 @@ func (ring *HashRing) AnalyzeDistribution(testKeys []string) DistributionStats {
 			nodeLoads[node]++
 		}
 	}
-	
+
 	// Calculate statistics
 	stats := DistributionStats{
 		NodeLoads: nodeLoads,
 		TotalKeys: len(testKeys),
 		MinLoad:   math.MaxInt,
 	}
-	
+
 	totalLoad := 0
 	for _, load := range nodeLoads {
 		totalLoad += load
@@ -424,14 +424,14 @@ func (ring *HashRing) AnalyzeDistribution(testKeys []string) DistributionStats {
 			stats.MaxLoad = load
 		}
 	}
-	
+
 	if len(nodeLoads) > 0 {
 		stats.AvgLoad = float64(totalLoad) / float64(len(nodeLoads))
-		
+
 		if stats.AvgLoad > 0 {
 			stats.LoadFactor = float64(stats.MaxLoad) / stats.AvgLoad
 		}
-		
+
 		// Calculate standard deviation
 		variance := 0.0
 		for _, load := range nodeLoads {
@@ -440,55 +440,55 @@ func (ring *HashRing) AnalyzeDistribution(testKeys []string) DistributionStats {
 		}
 		stats.StdDeviation = math.Sqrt(variance / float64(len(nodeLoads)))
 	}
-	
+
 	if stats.MinLoad == math.MaxInt {
 		stats.MinLoad = 0
 	}
-	
+
 	return stats
 }
 
 // HashRingMetrics provides operational metrics for the hash ring
 type HashRingMetrics struct {
 	// Performance metrics
-	LookupCount     int64   `json:"lookup_count"`
-	CacheHitCount   int64   `json:"cache_hit_count"`
-	CacheHitRate    float64 `json:"cache_hit_rate"`
-	
+	LookupCount   int64   `json:"lookup_count"`
+	CacheHitCount int64   `json:"cache_hit_count"`
+	CacheHitRate  float64 `json:"cache_hit_rate"`
+
 	// Ring state metrics
-	TotalNodes      int `json:"total_nodes"`
-	AliveNodes      int `json:"alive_nodes"`
-	SuspectedNodes  int `json:"suspected_nodes"`
-	DeadNodes       int `json:"dead_nodes"`
-	TotalVNodes     int `json:"total_vnodes"`
-	
+	TotalNodes     int `json:"total_nodes"`
+	AliveNodes     int `json:"alive_nodes"`
+	SuspectedNodes int `json:"suspected_nodes"`
+	DeadNodes      int `json:"dead_nodes"`
+	TotalVNodes    int `json:"total_vnodes"`
+
 	// Rebalancing metrics
-	RebalanceCount  int64 `json:"rebalance_count"`
-	
+	RebalanceCount int64 `json:"rebalance_count"`
+
 	// Memory metrics
-	CacheSize       int `json:"cache_size"`
-	CacheCapacity   int `json:"cache_capacity"`
+	CacheSize     int `json:"cache_size"`
+	CacheCapacity int `json:"cache_capacity"`
 }
 
 // GetMetrics returns current operational metrics
 func (ring *HashRing) GetMetrics() HashRingMetrics {
 	ring.mu.RLock()
 	defer ring.mu.RUnlock()
-	
+
 	metrics := HashRingMetrics{
-		LookupCount:     ring.lookupCount,
-		CacheHitCount:   ring.cacheHitCount,
-		TotalVNodes:     len(ring.vnodes),
-		CacheSize:       len(ring.lookupCache),
-		CacheCapacity:   ring.config.LookupCacheSize,
-		RebalanceCount:  ring.rebalanceCount,
+		LookupCount:    ring.lookupCount,
+		CacheHitCount:  ring.cacheHitCount,
+		TotalVNodes:    len(ring.vnodes),
+		CacheSize:      len(ring.lookupCache),
+		CacheCapacity:  ring.config.LookupCacheSize,
+		RebalanceCount: ring.rebalanceCount,
 	}
-	
+
 	// Calculate cache hit rate
 	if ring.lookupCount > 0 {
 		metrics.CacheHitRate = float64(ring.cacheHitCount) / float64(ring.lookupCount)
 	}
-	
+
 	// Count nodes by status
 	for _, node := range ring.nodes {
 		metrics.TotalNodes++
@@ -501,7 +501,7 @@ func (ring *HashRing) GetMetrics() HashRingMetrics {
 			metrics.DeadNodes++
 		}
 	}
-	
+
 	return metrics
 }
 

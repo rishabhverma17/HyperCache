@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
-	
+
 	"hypercache/internal/cache"
 )
 
@@ -13,16 +13,16 @@ func (s *BasicStore) StartPersistence(ctx context.Context) error {
 	if s.persistEngine == nil {
 		return nil // No persistence configured
 	}
-	
+
 	if err := s.persistEngine.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start persistence engine: %w", err)
 	}
-	
+
 	// Attempt recovery from persistence
 	if err := s.recoverFromPersistence(); err != nil {
 		return fmt.Errorf("failed to recover from persistence: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -31,7 +31,7 @@ func (s *BasicStore) StopPersistence() error {
 	if s.persistEngine == nil {
 		return nil
 	}
-	
+
 	return s.persistEngine.Stop()
 }
 
@@ -40,10 +40,10 @@ func (s *BasicStore) CreateSnapshot() error {
 	if s.persistEngine == nil {
 		return fmt.Errorf("persistence not enabled")
 	}
-	
+
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	
+
 	// Convert cache items to snapshot data
 	data := make(map[string]interface{})
 	for key, item := range s.items {
@@ -55,7 +55,7 @@ func (s *BasicStore) CreateSnapshot() error {
 		}
 		data[key] = value
 	}
-	
+
 	return s.persistEngine.CreateSnapshot(data)
 }
 
@@ -72,32 +72,32 @@ func (s *BasicStore) recoverFromPersistence() error {
 	if s.persistEngine == nil {
 		return nil
 	}
-	
+
 	// Read all persistence entries
 	entries, err := s.persistEngine.ReadEntries()
 	if err != nil {
 		return fmt.Errorf("failed to read persistence entries: %w", err)
 	}
-	
+
 	if len(entries) == 0 {
 		fmt.Printf("No persistence entries to recover\n")
 		return nil
 	}
-	
+
 	fmt.Printf("Recovering %d entries from persistence...\n", len(entries))
-	
+
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	recoveredCount := 0
 	errorCount := 0
-	
+
 	for _, entry := range entries {
 		switch entry.Operation {
 		case "SET":
 			// Deserialize the value - for simplicity, assume it's a string
 			value := string(entry.Value)
-			
+
 			// Calculate TTL from entry
 			var ttl time.Duration
 			if entry.TTL > 0 {
@@ -110,7 +110,7 @@ func (s *BasicStore) recoverFromPersistence() error {
 				}
 				ttl = time.Until(expiresAt)
 			}
-			
+
 			// Use internal set without persistence logging to avoid recursion
 			if err := s.setInternal(entry.Key, value, entry.SessionID, ttl); err != nil {
 				fmt.Printf("Warning: failed to recover SET %s: %v\n", entry.Key, err)
@@ -118,7 +118,7 @@ func (s *BasicStore) recoverFromPersistence() error {
 				continue
 			}
 			recoveredCount++
-			
+
 		case "DEL":
 			// Delete the key if it exists
 			if _, exists := s.items[entry.Key]; exists {
@@ -129,14 +129,14 @@ func (s *BasicStore) recoverFromPersistence() error {
 				}
 				recoveredCount++
 			}
-			
+
 		case "CLEAR":
 			// Clear all items
 			s.clearInternal()
 			recoveredCount++
 		}
 	}
-	
+
 	fmt.Printf("Recovery complete: %d entries recovered, %d errors\n", recoveredCount, errorCount)
 	return nil
 }
@@ -146,23 +146,23 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 	if key == "" {
 		return fmt.Errorf("key cannot be empty")
 	}
-	
+
 	// Serialize the value
 	serializedData, valueType, err := serializeValue(value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize value: %w", err)
 	}
-	
+
 	size := uint64(len(serializedData))
-	
+
 	// Allocate memory
 	allocatedMemory, err := s.memPool.Allocate(int64(size))
 	if err != nil {
 		return fmt.Errorf("failed to allocate memory: %w", err)
 	}
-	
+
 	copy(allocatedMemory, serializedData)
-	
+
 	// Handle existing item
 	if existingItem, exists := s.items[key]; exists {
 		if oldPtr, ptrExists := s.allocatedPtrs[key]; ptrExists {
@@ -174,13 +174,13 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 		s.stats.TotalItems--
 		s.stats.TotalMemory -= existingItem.Size
 	}
-	
+
 	// Create new item
 	expiresAt := time.Time{}
 	if ttl > 0 {
 		expiresAt = time.Now().Add(ttl)
 	}
-	
+
 	item := &CacheItem{
 		Key:          key,
 		ValuePtr:     allocatedMemory,
@@ -192,22 +192,22 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 		AccessCount:  0,
 		LastAccessed: time.Now(),
 	}
-	
+
 	// Store the item
 	s.items[key] = item
 	s.allocatedPtrs[key] = allocatedMemory
 	s.stats.TotalItems++
 	s.stats.TotalMemory += size
-	
+
 	// Add to eviction policy
 	entry := s.itemToEntry(key, item)
 	s.evictPolicy.OnInsert(entry)
-	
+
 	// Add to filter
 	if s.filter != nil {
 		s.filter.Add([]byte(key))
 	}
-	
+
 	return nil
 }
 
@@ -217,27 +217,27 @@ func (s *BasicStore) deleteInternal(key string) error {
 	if !exists {
 		return fmt.Errorf("key not found: %s", key)
 	}
-	
+
 	// Free memory
 	if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
 		s.memPool.Free(ptr)
 		delete(s.allocatedPtrs, key)
 	}
-	
+
 	// Remove from eviction policy
 	entry := s.itemToEntry(key, item)
 	s.evictPolicy.OnDelete(entry)
-	
+
 	// Remove from items
 	delete(s.items, key)
 	s.stats.TotalItems--
 	s.stats.TotalMemory -= item.Size
-	
+
 	// Remove from filter
 	if s.filter != nil {
 		s.filter.Delete([]byte(key))
 	}
-	
+
 	return nil
 }
 
@@ -247,7 +247,7 @@ func (s *BasicStore) clearInternal() {
 	for _, ptr := range s.allocatedPtrs {
 		s.memPool.Free(ptr)
 	}
-	
+
 	// Clear all data structures
 	s.items = make(map[string]*CacheItem)
 	s.allocatedPtrs = make(map[string][]byte)

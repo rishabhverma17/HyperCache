@@ -1,5 +1,7 @@
 // Detailed Explanation: Go Method with Context Checking
 
+//go:build ignore
+
 package main
 
 import (

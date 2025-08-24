@@ -1,5 +1,7 @@
 // Example: Context Usage in HyperCache Implementation
 
+//go:build ignore
+
 package main
 
 import (

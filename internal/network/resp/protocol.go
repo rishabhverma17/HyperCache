@@ -52,7 +52,7 @@ func (p *Parser) parseValue() (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	switch typeByte {
 	case TypeSimpleString:
 		return p.parseSimpleString()
@@ -75,7 +75,7 @@ func (p *Parser) parseSimpleString() (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Value{
 		Type: TypeSimpleString,
 		Str:  line,
@@ -89,7 +89,7 @@ func (p *Parser) parseError() (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Value{
 		Type: TypeError,
 		Str:  line,
@@ -103,12 +103,12 @@ func (p *Parser) parseInteger() (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	num, err := strconv.ParseInt(line, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid integer: %s", line)
 	}
-	
+
 	return &Value{
 		Type: TypeInteger,
 		Int:  num,
@@ -122,12 +122,12 @@ func (p *Parser) parseBulkString() (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	length, err := strconv.Atoi(line)
 	if err != nil {
 		return nil, fmt.Errorf("invalid bulk string length: %s", line)
 	}
-	
+
 	// Handle null bulk string
 	if length == -1 {
 		return &Value{
@@ -136,7 +136,7 @@ func (p *Parser) parseBulkString() (*Value, error) {
 			Raw:  []byte("$-1\r\n"),
 		}, nil
 	}
-	
+
 	// Handle empty bulk string
 	if length == 0 {
 		// Still need to consume the \r\n
@@ -150,27 +150,27 @@ func (p *Parser) parseBulkString() (*Value, error) {
 			Raw:  []byte("$0\r\n\r\n"),
 		}, nil
 	}
-	
+
 	// Read the string data
 	data := make([]byte, length)
 	_, err = io.ReadFull(p.reader, data)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Read the trailing \r\n
 	crlf := make([]byte, 2)
 	_, err = io.ReadFull(p.reader, crlf)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if crlf[0] != '\r' || crlf[1] != '\n' {
 		return nil, fmt.Errorf("expected CRLF after bulk string")
 	}
-	
+
 	raw := []byte(fmt.Sprintf("$%d\r\n%s\r\n", length, data))
-	
+
 	return &Value{
 		Type: TypeBulkString,
 		Str:  string(data),
@@ -184,12 +184,12 @@ func (p *Parser) parseArray() (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	length, err := strconv.Atoi(line)
 	if err != nil {
 		return nil, fmt.Errorf("invalid array length: %s", line)
 	}
-	
+
 	// Handle null array
 	if length == -1 {
 		return &Value{
@@ -198,7 +198,7 @@ func (p *Parser) parseArray() (*Value, error) {
 			Raw:  []byte("*-1\r\n"),
 		}, nil
 	}
-	
+
 	// Handle empty array
 	if length == 0 {
 		return &Value{
@@ -207,12 +207,12 @@ func (p *Parser) parseArray() (*Value, error) {
 			Raw:   []byte("*0\r\n"),
 		}, nil
 	}
-	
+
 	// Parse array elements
 	elements := make([]Value, length)
 	var rawBuilder strings.Builder
 	rawBuilder.WriteString(fmt.Sprintf("*%d\r\n", length))
-	
+
 	for i := 0; i < length; i++ {
 		element, err := p.parseValue()
 		if err != nil {
@@ -221,7 +221,7 @@ func (p *Parser) parseArray() (*Value, error) {
 		elements[i] = *element
 		rawBuilder.Write(element.Raw)
 	}
-	
+
 	return &Value{
 		Type:  TypeArray,
 		Array: elements,
@@ -235,12 +235,12 @@ func (p *Parser) readLine() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Remove \r\n
 	if len(line) < 2 || line[len(line)-2:] != "\r\n" {
 		return "", fmt.Errorf("line must end with CRLF")
 	}
-	
+
 	return line[:len(line)-2], nil
 }
 
@@ -293,14 +293,14 @@ func (f *Formatter) FormatArray(elements [][]byte) []byte {
 	if len(elements) == 0 {
 		return []byte("*0\r\n")
 	}
-	
+
 	var result strings.Builder
 	result.WriteString(fmt.Sprintf("*%d\r\n", len(elements)))
-	
+
 	for _, element := range elements {
 		result.Write(element)
 	}
-	
+
 	return []byte(result.String())
 }
 
@@ -316,19 +316,19 @@ func ParseCommand(value *Value) (*Command, error) {
 	if value.Type != TypeArray {
 		return nil, fmt.Errorf("command must be an array")
 	}
-	
+
 	if value.Null || len(value.Array) == 0 {
 		return nil, fmt.Errorf("empty command")
 	}
-	
+
 	// First element is the command name
 	if value.Array[0].Type != TypeBulkString {
 		return nil, fmt.Errorf("command name must be a bulk string")
 	}
-	
+
 	cmdName := strings.ToUpper(value.Array[0].Str)
 	args := make([]string, len(value.Array)-1)
-	
+
 	// Remaining elements are arguments
 	for i, arg := range value.Array[1:] {
 		if arg.Type != TypeBulkString {
@@ -336,7 +336,7 @@ func ParseCommand(value *Value) (*Command, error) {
 		}
 		args[i] = arg.Str
 	}
-	
+
 	return &Command{
 		Name: cmdName,
 		Args: args,

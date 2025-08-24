@@ -31,19 +31,19 @@ type NetworkConfig struct {
 	// RESP API configuration
 	RESPBindAddr string `yaml:"resp_bind_addr"`
 	RESPPort     int    `yaml:"resp_port"`
-	
+
 	// HTTP API configuration
 	HTTPBindAddr string `yaml:"http_bind_addr"`
 	HTTPPort     int    `yaml:"http_port"`
-	
+
 	// Cluster gossip configuration
-	AdvertiseAddr string `yaml:"advertise_addr"`  // IP that other nodes use to connect
-	GossipPort    int    `yaml:"gossip_port"`     // Serf gossip port
+	AdvertiseAddr string `yaml:"advertise_addr"` // IP that other nodes use to connect
+	GossipPort    int    `yaml:"gossip_port"`    // Serf gossip port
 }
 
 // ClusterConfig contains clustering configuration
 type ClusterConfig struct {
-	Seeds             []string `yaml:"seeds"`              // Seed nodes for joining cluster
+	Seeds             []string `yaml:"seeds"` // Seed nodes for joining cluster
 	ReplicationFactor int      `yaml:"replication_factor"`
 	ConsistencyLevel  string   `yaml:"consistency_level"`
 }
@@ -58,9 +58,9 @@ type StorageConfig struct {
 // PersistenceConfig defines persistence behavior
 type PersistenceConfig struct {
 	Enabled          bool          `yaml:"enabled"`
-	Strategy         string        `yaml:"strategy"`          // "aof", "snapshot", "hybrid"
+	Strategy         string        `yaml:"strategy"` // "aof", "snapshot", "hybrid"
 	EnableAOF        bool          `yaml:"enable_aof"`
-	SyncPolicy       string        `yaml:"sync_policy"`       // "always", "everysec", "no"
+	SyncPolicy       string        `yaml:"sync_policy"` // "always", "everysec", "no"
 	SyncInterval     time.Duration `yaml:"sync_interval"`
 	SnapshotInterval time.Duration `yaml:"snapshot_interval"`
 	MaxLogSize       string        `yaml:"max_log_size"`
@@ -77,14 +77,14 @@ type CacheConfig struct {
 
 // LoggingConfig contains logging configuration
 type LoggingConfig struct {
-	Level         string `yaml:"level"`           // debug, info, warn, error, fatal
-	EnableConsole bool   `yaml:"enable_console"`  // Enable console output
-	EnableFile    bool   `yaml:"enable_file"`     // Enable file output
-	LogFile       string `yaml:"log_file"`        // Log file path
-	BufferSize    int    `yaml:"buffer_size"`     // Async log buffer size
-	LogDir        string `yaml:"log_dir"`         // Log directory
-	MaxFileSize   string `yaml:"max_file_size"`   // Maximum log file size before rotation
-	MaxFiles      int    `yaml:"max_files"`       // Maximum number of log files to keep
+	Level         string `yaml:"level"`          // debug, info, warn, error, fatal
+	EnableConsole bool   `yaml:"enable_console"` // Enable console output
+	EnableFile    bool   `yaml:"enable_file"`    // Enable file output
+	LogFile       string `yaml:"log_file"`       // Log file path
+	BufferSize    int    `yaml:"buffer_size"`    // Async log buffer size
+	LogDir        string `yaml:"log_dir"`        // Log directory
+	MaxFileSize   string `yaml:"max_file_size"`  // Maximum log file size before rotation
+	MaxFiles      int    `yaml:"max_files"`      // Maximum number of log files to keep
 }
 
 // StoreConfig represents configuration for individual stores
@@ -106,9 +106,9 @@ func Load(path string) (*Config, error) {
 		Network: NetworkConfig{
 			RESPBindAddr:  "0.0.0.0",
 			RESPPort:      8080,
-			HTTPBindAddr:  "0.0.0.0", 
+			HTTPBindAddr:  "0.0.0.0",
 			HTTPPort:      9080,
-			AdvertiseAddr: "",        // Auto-detect if empty
+			AdvertiseAddr: "", // Auto-detect if empty
 			GossipPort:    7946,
 		},
 		Cluster: ClusterConfig{
@@ -141,7 +141,7 @@ func Load(path string) (*Config, error) {
 			Level:         "info",
 			EnableConsole: true,
 			EnableFile:    true,
-			LogFile:       "",        // Will be set based on node ID
+			LogFile:       "", // Will be set based on node ID
 			BufferSize:    1000,
 			LogDir:        "logs",
 			MaxFileSize:   "100MB",
@@ -213,7 +213,7 @@ func (c *Config) Validate() error {
 	if len(c.Stores) == 0 {
 		return fmt.Errorf("at least one store must be configured")
 	}
-	
+
 	// Validate store configurations
 	storeNames := make(map[string]bool)
 	for _, store := range c.Stores {
@@ -224,27 +224,27 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("duplicate store name: %s", store.Name)
 		}
 		storeNames[store.Name] = true
-		
+
 		if !isValidEvictionPolicy(store.EvictionPolicy) {
 			return fmt.Errorf("invalid eviction policy for store %s: %s", store.Name, store.EvictionPolicy)
 		}
 	}
-	
+
 	// Validate persistence configuration
 	if c.Persistence.Enabled {
 		if !isValidPersistenceStrategy(c.Persistence.Strategy) {
 			return fmt.Errorf("invalid persistence strategy: %s", c.Persistence.Strategy)
 		}
-		
+
 		if !isValidSyncPolicy(c.Persistence.SyncPolicy) {
 			return fmt.Errorf("invalid persistence sync policy: %s", c.Persistence.SyncPolicy)
 		}
-		
+
 		if c.Persistence.CompressionLevel < 0 || c.Persistence.CompressionLevel > 9 {
 			return fmt.Errorf("compression level must be between 0 and 9")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -252,7 +252,7 @@ func (c *Config) Validate() error {
 func isValidEvictionPolicy(policy string) bool {
 	validPolicies := map[string]bool{
 		"lru":  true, // Least Recently Used
-		"lfu":  true, // Least Frequently Used  
+		"lfu":  true, // Least Frequently Used
 		"fifo": true, // First In First Out
 		"ttl":  true, // Time To Live based
 	}
@@ -262,7 +262,7 @@ func isValidEvictionPolicy(policy string) bool {
 // isValidPersistenceStrategy checks if the persistence strategy is supported
 func isValidPersistenceStrategy(strategy string) bool {
 	validStrategies := map[string]bool{
-		"aof":     true, // Append-Only File
+		"aof":      true, // Append-Only File
 		"snapshot": true, // Point-in-time snapshots
 		"hybrid":   true, // Combination of AOF and snapshots
 	}
@@ -272,9 +272,9 @@ func isValidPersistenceStrategy(strategy string) bool {
 // isValidSyncPolicy checks if the sync policy is supported
 func isValidSyncPolicy(policy string) bool {
 	validPolicies := map[string]bool{
-		"always":    true, // Sync after every write
-		"everysec":  true, // Sync once per second
-		"no":        true, // Let the OS handle syncing
+		"always":   true, // Sync after every write
+		"everysec": true, // Sync once per second
+		"no":       true, // Let the OS handle syncing
 	}
 	return validPolicies[policy]
 }
@@ -283,22 +283,22 @@ func isValidSyncPolicy(policy string) bool {
 func (c *Config) ToClusterConfig() interface{} {
 	// This needs to match the ClusterConfig from internal/cluster/interfaces.go
 	return struct {
-		NodeID           string   `yaml:"node_id" json:"node_id"`
-		ClusterName      string   `yaml:"cluster_name" json:"cluster_name"`
-		BindAddress      string   `yaml:"bind_address" json:"bind_address"`
-		BindPort         int      `yaml:"bind_port" json:"bind_port"`
-		AdvertiseAddress string   `yaml:"advertise_address" json:"advertise_address"`
-		SeedNodes        []string `yaml:"seed_nodes" json:"seed_nodes"`
-		JoinTimeout      int      `yaml:"join_timeout_seconds" json:"join_timeout_seconds"`
-		HeartbeatInterval int     `yaml:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+		NodeID            string   `yaml:"node_id" json:"node_id"`
+		ClusterName       string   `yaml:"cluster_name" json:"cluster_name"`
+		BindAddress       string   `yaml:"bind_address" json:"bind_address"`
+		BindPort          int      `yaml:"bind_port" json:"bind_port"`
+		AdvertiseAddress  string   `yaml:"advertise_address" json:"advertise_address"`
+		SeedNodes         []string `yaml:"seed_nodes" json:"seed_nodes"`
+		JoinTimeout       int      `yaml:"join_timeout_seconds" json:"join_timeout_seconds"`
+		HeartbeatInterval int      `yaml:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
 	}{
-		NodeID:           c.Node.ID,
-		ClusterName:      "hypercache",
-		BindAddress:      "0.0.0.0",      // Always bind to all interfaces
-		BindPort:         c.Network.GossipPort,
-		AdvertiseAddress: c.Network.AdvertiseAddr,
-		SeedNodes:        c.Cluster.Seeds,
-		JoinTimeout:      30,
+		NodeID:            c.Node.ID,
+		ClusterName:       "hypercache",
+		BindAddress:       "0.0.0.0", // Always bind to all interfaces
+		BindPort:          c.Network.GossipPort,
+		AdvertiseAddress:  c.Network.AdvertiseAddr,
+		SeedNodes:         c.Cluster.Seeds,
+		JoinTimeout:       30,
 		HeartbeatInterval: 5,
 	}
 }

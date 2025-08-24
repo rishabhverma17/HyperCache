@@ -27,7 +27,7 @@ jobs:
         go mod tidy
 
     - name: Run tests
-      run: go test ./...
+      run: go test ./tests/... ./internal/... ./pkg/...
 
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v5
