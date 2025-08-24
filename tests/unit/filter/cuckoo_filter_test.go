@@ -24,7 +24,7 @@ func TestCuckooFilterBasics(t *testing.T) {
 	// Test adding and checking elements
 	t.Run("Add_and_Contains", func(t *testing.T) {
 		testKey := []byte("test-key-1")
-		
+
 		// Initially should not contain the key
 		if cuckooFilter.Contains(testKey) {
 			t.Errorf("Filter should not contain key before adding")
@@ -67,7 +67,7 @@ func TestCuckooFilterBasics(t *testing.T) {
 		expectedRate := config.FalsePositiveRate
 
 		t.Logf("False positive rate: %.4f (expected: %.4f)", falsePositiveRate, expectedRate)
-		
+
 		// Allow significant tolerance for small filters
 		maxAllowedRate := expectedRate * 10 // More lenient for testing
 		if falsePositiveRate > maxAllowedRate {
@@ -80,7 +80,7 @@ func TestCuckooFilterBasics(t *testing.T) {
 	// Test deletion
 	t.Run("Delete_Functionality", func(t *testing.T) {
 		testKey := []byte("delete-test-key")
-		
+
 		// Add key
 		if err := cuckooFilter.Add(testKey); err != nil {
 			t.Fatalf("Failed to add key: %v", err)
@@ -129,12 +129,12 @@ func TestCuckooFilterCapacity(t *testing.T) {
 		}
 	}
 
-	t.Logf("Successfully added %d/%d items (expected: %d)", 
+	t.Logf("Successfully added %d/%d items (expected: %d)",
 		successfulAdds, totalAttempts, config.ExpectedItems)
 
 	// Should be able to add close to expected capacity
 	if successfulAdds < int(config.ExpectedItems)*80/100 { // At least 80% of expected capacity
-		t.Errorf("Could only add %d items, expected closer to %d", 
+		t.Errorf("Could only add %d items, expected closer to %d",
 			successfulAdds, config.ExpectedItems)
 	}
 }
@@ -177,7 +177,7 @@ func TestCuckooFilterStats(t *testing.T) {
 
 	// Verify stats were updated
 	if updatedStats.Size <= initialCount {
-		t.Errorf("Item count should have increased: %d -> %d", 
+		t.Errorf("Item count should have increased: %d -> %d",
 			initialCount, updatedStats.Size)
 	}
 
@@ -208,17 +208,17 @@ func TestCuckooFilterConcurrency(t *testing.T) {
 	t.Run("Concurrent_Adds", func(t *testing.T) {
 		const numGoroutines = 10
 		const keysPerGoroutine = 100
-		
+
 		done := make(chan bool, numGoroutines)
-		
+
 		for g := 0; g < numGoroutines; g++ {
 			go func(goroutineID int) {
 				defer func() { done <- true }()
-				
+
 				for i := 0; i < keysPerGoroutine; i++ {
 					key := []byte(fmt.Sprintf("concurrent-%d-%d", goroutineID, i))
 					if err := cuckooFilter.Add(key); err != nil {
-						t.Logf("Warning: Goroutine %d failed to add key %d: %v", 
+						t.Logf("Warning: Goroutine %d failed to add key %d: %v",
 							goroutineID, i, err)
 					}
 				}
@@ -248,13 +248,13 @@ func TestCuckooFilterConcurrency(t *testing.T) {
 
 		const numReaders = 10
 		const readsPerGoroutine = 200
-		
+
 		done := make(chan bool, numReaders)
-		
+
 		for g := 0; g < numReaders; g++ {
 			go func(goroutineID int) {
 				defer func() { done <- true }()
-				
+
 				for i := 0; i < readsPerGoroutine; i++ {
 					key := []byte(fmt.Sprintf("read-test-%d", i%100))
 					_ = cuckooFilter.Contains(key) // Just testing for race conditions
@@ -309,14 +309,14 @@ func BenchmarkCuckooFilter(b *testing.B) {
 		}
 	})
 
-	// Benchmark Delete operations  
+	// Benchmark Delete operations
 	b.Run("Delete", func(b *testing.B) {
 		// Pre-populate
 		for i := 0; i < b.N; i++ {
 			key := []byte(fmt.Sprintf("bench-delete-%d", i))
 			cuckooFilter.Add(key)
 		}
-		
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			key := []byte(fmt.Sprintf("bench-delete-%d", i))

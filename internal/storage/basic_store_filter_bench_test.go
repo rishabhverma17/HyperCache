@@ -17,14 +17,14 @@ func BenchmarkBasicStoreWithFilter_Set(b *testing.B) {
 		EnableStatistics: true,
 		CleanupInterval:  time.Minute,
 		FilterConfig: &filter.FilterConfig{
-			FilterType:           "cuckoo",
-			ExpectedItems:        uint64(b.N),
-			FalsePositiveRate:    0.001,
-			FingerprintSize:      12,
-			BucketSize:           4,
-			MaxEvictionAttempts:  500,
-			EnableAutoResize:     true,
-			EnableStatistics:     true,
+			FilterType:          "cuckoo",
+			ExpectedItems:       uint64(b.N),
+			FalsePositiveRate:   0.001,
+			FingerprintSize:     12,
+			BucketSize:          4,
+			MaxEvictionAttempts: 500,
+			EnableAutoResize:    true,
+			EnableStatistics:    true,
 		},
 	}
 
@@ -58,14 +58,14 @@ func BenchmarkBasicStoreWithFilter_Get(b *testing.B) {
 		EnableStatistics: true,
 		CleanupInterval:  time.Minute,
 		FilterConfig: &filter.FilterConfig{
-			FilterType:           "cuckoo",
-			ExpectedItems:        1000, // Smaller dataset
-			FalsePositiveRate:    0.001,
-			FingerprintSize:      12,
-			BucketSize:           4,
-			MaxEvictionAttempts:  500,
-			EnableAutoResize:     true,
-			EnableStatistics:     true,
+			FilterType:          "cuckoo",
+			ExpectedItems:       1000, // Smaller dataset
+			FalsePositiveRate:   0.001,
+			FingerprintSize:     12,
+			BucketSize:          4,
+			MaxEvictionAttempts: 500,
+			EnableAutoResize:    true,
+			EnableStatistics:    true,
 		},
 	}
 
@@ -112,14 +112,14 @@ func BenchmarkBasicStoreWithFilter_GetMiss(b *testing.B) {
 		EnableStatistics: true,
 		CleanupInterval:  time.Minute,
 		FilterConfig: &filter.FilterConfig{
-			FilterType:           "cuckoo",
-			ExpectedItems:        10000,
-			FalsePositiveRate:    0.001,
-			FingerprintSize:      12,
-			BucketSize:           4,
-			MaxEvictionAttempts:  500,
-			EnableAutoResize:     true,
-			EnableStatistics:     true,
+			FilterType:          "cuckoo",
+			ExpectedItems:       10000,
+			FalsePositiveRate:   0.001,
+			FingerprintSize:     12,
+			BucketSize:          4,
+			MaxEvictionAttempts: 500,
+			EnableAutoResize:    true,
+			EnableStatistics:    true,
 		},
 	}
 

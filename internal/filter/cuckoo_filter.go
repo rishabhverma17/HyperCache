@@ -25,18 +25,18 @@ type CuckooFilter struct {
 	name   string
 
 	// Core data structure
-	buckets           []bucket    // Array of buckets containing fingerprints
-	numBuckets        uint64      // Number of buckets
-	bucketSize        uint8       // Slots per bucket (typically 4)
-	fingerprintSize   uint8       // Bits per fingerprint
-	fingerprintMask   uint32      // Mask for fingerprint extraction
-	maxEvictionLength uint32      // Maximum eviction chain length
+	buckets           []bucket // Array of buckets containing fingerprints
+	numBuckets        uint64   // Number of buckets
+	bucketSize        uint8    // Slots per bucket (typically 4)
+	fingerprintSize   uint8    // Bits per fingerprint
+	fingerprintMask   uint32   // Mask for fingerprint extraction
+	maxEvictionLength uint32   // Maximum eviction chain length
 
 	// Statistics (atomic for thread safety)
 	size              uint64 // Current number of items
 	capacity          uint64 // Maximum capacity
 	addOps            uint64 // Add operations counter
-	lookupOps         uint64 // Lookup operations counter  
+	lookupOps         uint64 // Lookup operations counter
 	deleteOps         uint64 // Delete operations counter
 	clearOps          uint64 // Clear operations counter
 	successfulAdds    uint64 // Successful add operations
@@ -48,8 +48,8 @@ type CuckooFilter struct {
 	resizeOps         uint64 // Resize operations
 
 	// Timing
-	createdAt     time.Time
-	lastModified  time.Time
+	createdAt      time.Time
+	lastModified   time.Time
 	lastStatsReset time.Time
 
 	// Thread safety
@@ -150,7 +150,7 @@ func (cf *CuckooFilter) Add(key []byte) error {
 		return nil
 	}
 
-	// Try to insert in bucket2  
+	// Try to insert in bucket2
 	if cf.insertToBucket(bucket2, fingerprint) {
 		atomic.AddUint64(&cf.size, 1)
 		atomic.AddUint64(&cf.successfulAdds, 1)
@@ -281,25 +281,25 @@ func (cf *CuckooFilter) GetStats() *FilterStats {
 	defer cf.mutex.RUnlock()
 
 	return &FilterStats{
-		Size:               atomic.LoadUint64(&cf.size),
-		Capacity:           cf.capacity,
-		LoadFactor:         cf.LoadFactor(),
-		MemoryUsage:        cf.EstimatedMemoryUsage(),
-		FalsePositiveRate:  cf.FalsePositiveRate(),
-		AddOperations:      atomic.LoadUint64(&cf.addOps),
-		LookupOperations:   atomic.LoadUint64(&cf.lookupOps),
-		DeleteOperations:   atomic.LoadUint64(&cf.deleteOps),
-		ClearOperations:    atomic.LoadUint64(&cf.clearOps),
-		SuccessfulAdds:     atomic.LoadUint64(&cf.successfulAdds),
-		FailedAdds:         atomic.LoadUint64(&cf.failedAdds),
-		SuccessfulDeletes:  atomic.LoadUint64(&cf.successfulDeletes),
-		FailedDeletes:      atomic.LoadUint64(&cf.failedDeletes),
-		EvictionChains:     atomic.LoadUint64(&cf.evictionChains),
-		MaxEvictionLength:  atomic.LoadUint32(&cf.maxEvictionLen),
-		ResizeOperations:   atomic.LoadUint64(&cf.resizeOps),
-		CreatedAt:          cf.createdAt,
-		LastModified:       cf.lastModified,
-		LastStatsReset:     cf.lastStatsReset,
+		Size:              atomic.LoadUint64(&cf.size),
+		Capacity:          cf.capacity,
+		LoadFactor:        cf.LoadFactor(),
+		MemoryUsage:       cf.EstimatedMemoryUsage(),
+		FalsePositiveRate: cf.FalsePositiveRate(),
+		AddOperations:     atomic.LoadUint64(&cf.addOps),
+		LookupOperations:  atomic.LoadUint64(&cf.lookupOps),
+		DeleteOperations:  atomic.LoadUint64(&cf.deleteOps),
+		ClearOperations:   atomic.LoadUint64(&cf.clearOps),
+		SuccessfulAdds:    atomic.LoadUint64(&cf.successfulAdds),
+		FailedAdds:        atomic.LoadUint64(&cf.failedAdds),
+		SuccessfulDeletes: atomic.LoadUint64(&cf.successfulDeletes),
+		FailedDeletes:     atomic.LoadUint64(&cf.failedDeletes),
+		EvictionChains:    atomic.LoadUint64(&cf.evictionChains),
+		MaxEvictionLength: atomic.LoadUint32(&cf.maxEvictionLen),
+		ResizeOperations:  atomic.LoadUint64(&cf.resizeOps),
+		CreatedAt:         cf.createdAt,
+		LastModified:      cf.lastModified,
+		LastStatsReset:    cf.lastStatsReset,
 	}
 }
 
@@ -307,13 +307,13 @@ func (cf *CuckooFilter) GetStats() *FilterStats {
 func (cf *CuckooFilter) EstimatedMemoryUsage() uint64 {
 	// Bucket storage: numBuckets × (4 fingerprints × 2 bytes + 1 occupied byte)
 	bucketStorage := cf.numBuckets * (4*2 + 1)
-	
+
 	// Struct overhead
 	structOverhead := uint64(unsafe.Sizeof(*cf))
-	
+
 	// Slice header overhead
 	sliceOverhead := uint64(unsafe.Sizeof(cf.buckets))
-	
+
 	return bucketStorage + structOverhead + sliceOverhead
 }
 
@@ -350,18 +350,18 @@ func (cf *CuckooFilter) altBucketIndex(bucketIdx uint64, fingerprint uint32) uin
 	// Use a different hash function for alternative bucket calculation
 	altHash := uint64(fingerprint)
 	altHash ^= altHash >> 16
-	altHash *= 0x85ebca6b  // Different constant than MurmurHash
+	altHash *= 0x85ebca6b // Different constant than MurmurHash
 	altHash ^= altHash >> 13
-	altHash *= 0xc2b2ae35  // Second mixing constant
+	altHash *= 0xc2b2ae35 // Second mixing constant
 	altHash ^= altHash >> 16
-	
+
 	return (bucketIdx ^ altHash) % cf.numBuckets
 }
 
 // insertToBucket tries to insert a fingerprint into a bucket
 func (cf *CuckooFilter) insertToBucket(bucketIdx uint64, fingerprint uint32) bool {
 	bucket := &cf.buckets[bucketIdx]
-	
+
 	// Find first empty slot
 	for i := uint8(0); i < cf.bucketSize && i < 4; i++ {
 		if (bucket.occupied & (1 << i)) == 0 {
@@ -377,7 +377,7 @@ func (cf *CuckooFilter) insertToBucket(bucketIdx uint64, fingerprint uint32) boo
 func (cf *CuckooFilter) bucketContains(bucketIdx uint64, fingerprint uint32) bool {
 	bucket := &cf.buckets[bucketIdx]
 	fp16 := uint16(fingerprint)
-	
+
 	// Check all occupied slots
 	for i := uint8(0); i < cf.bucketSize && i < 4; i++ {
 		if (bucket.occupied & (1 << i)) != 0 {
@@ -393,7 +393,7 @@ func (cf *CuckooFilter) bucketContains(bucketIdx uint64, fingerprint uint32) boo
 func (cf *CuckooFilter) deleteFromBucket(bucketIdx uint64, fingerprint uint32) bool {
 	bucket := &cf.buckets[bucketIdx]
 	fp16 := uint16(fingerprint)
-	
+
 	// Find and remove the fingerprint
 	for i := uint8(0); i < cf.bucketSize && i < 4; i++ {
 		if (bucket.occupied & (1 << i)) != 0 {
@@ -410,20 +410,20 @@ func (cf *CuckooFilter) deleteFromBucket(bucketIdx uint64, fingerprint uint32) b
 // evictAndInsert performs the cuckoo eviction process
 func (cf *CuckooFilter) evictAndInsert(bucketIdx uint64, fingerprint uint32) bool {
 	atomic.AddUint64(&cf.evictionChains, 1)
-	
+
 	currentBucket := bucketIdx
 	currentFingerprint := fingerprint
 	evictionLength := uint32(0)
-	
+
 	for evictionLength < cf.maxEvictionLength {
 		// Pick a random slot to evict
 		bucket := &cf.buckets[currentBucket]
 		slotIdx := cf.randomSlot(bucket)
-		
+
 		// Swap fingerprints
 		evictedFingerprint := uint32(bucket.fingerprints[slotIdx])
 		bucket.fingerprints[slotIdx] = uint16(currentFingerprint)
-		
+
 		// Try to place evicted fingerprint in its alternative bucket
 		altBucket := cf.altBucketIndex(currentBucket, evictedFingerprint)
 		if cf.insertToBucket(altBucket, evictedFingerprint) {
@@ -433,13 +433,13 @@ func (cf *CuckooFilter) evictAndInsert(bucketIdx uint64, fingerprint uint32) boo
 			}
 			return true
 		}
-		
+
 		// Continue eviction chain
 		currentBucket = altBucket
 		currentFingerprint = evictedFingerprint
 		evictionLength++
 	}
-	
+
 	return false // Eviction failed
 }
 
@@ -452,11 +452,11 @@ func (cf *CuckooFilter) randomSlot(bucket *bucket) uint8 {
 			occupiedSlots = append(occupiedSlots, i)
 		}
 	}
-	
+
 	if len(occupiedSlots) == 0 {
 		return 0 // Shouldn't happen in normal operation
 	}
-	
+
 	// Use crypto/rand for better randomness
 	randBytes := make([]byte, 1)
 	rand.Read(randBytes)

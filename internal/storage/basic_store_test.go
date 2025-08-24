@@ -48,7 +48,7 @@ func TestBasicStore_NewBasicStore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store, err := NewBasicStore(tt.config)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("NewBasicStore() expected error but got none")
@@ -146,7 +146,7 @@ func TestBasicStore_SetAndGet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test Set
 			err := store.Set(tt.key, tt.value, tt.sessionID, tt.ttl)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Set() expected error but got none")
@@ -415,7 +415,7 @@ func TestBasicStore_ConcurrentOperations(t *testing.T) {
 				key := fmt.Sprintf("key-%d-%d", goroutineID, j)
 				value := fmt.Sprintf("value-%d-%d", goroutineID, j)
 				sessionID := fmt.Sprintf("session-%d", goroutineID)
-				
+
 				if err := store.Set(key, value, sessionID, 0); err != nil {
 					errorChan <- fmt.Errorf("Set error in goroutine %d: %w", goroutineID, err)
 				}
@@ -440,14 +440,14 @@ func TestBasicStore_ConcurrentOperations(t *testing.T) {
 	// Concurrent Get operations
 	errorChan = make(chan error, numGoroutines*operationsPerGoroutine)
 	wg.Add(numGoroutines)
-	
+
 	for i := 0; i < numGoroutines; i++ {
 		go func(goroutineID int) {
 			defer wg.Done()
 			for j := 0; j < operationsPerGoroutine; j++ {
 				key := fmt.Sprintf("key-%d-%d", goroutineID, j)
 				expectedValue := fmt.Sprintf("value-%d-%d", goroutineID, j)
-				
+
 				value, err := store.Get(key)
 				if err != nil {
 					errorChan <- fmt.Errorf("Get error in goroutine %d: %w", goroutineID, err)

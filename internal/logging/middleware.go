@@ -13,15 +13,15 @@ func HTTPMiddleware(next http.Handler) http.Handler {
 		if correlationID == "" {
 			correlationID = NewCorrelationID()
 		}
-		
+
 		// Add correlation ID to context
 		requestCtx := r.Context()
 		ctx := WithCorrelationID(requestCtx, correlationID)
 		r = r.WithContext(ctx)
-		
+
 		// Add correlation ID to response headers
 		w.Header().Set("X-Correlation-ID", correlationID)
-		
+
 		// Log request start
 		start := time.Now()
 		Info(ctx, ComponentHTTP, ActionRequest, "HTTP request started", map[string]interface{}{
@@ -31,13 +31,13 @@ func HTTPMiddleware(next http.Handler) http.Handler {
 			"remote_ip":  r.RemoteAddr,
 			"user_agent": r.Header.Get("User-Agent"),
 		})
-		
+
 		// Wrap response writer to capture status code
 		wrapper := &responseWrapper{ResponseWriter: w, statusCode: 200}
-		
+
 		// Call next handler
 		next.ServeHTTP(wrapper, r)
-		
+
 		// Log request completion
 		duration := time.Since(start)
 		level := INFO
@@ -46,7 +46,7 @@ func HTTPMiddleware(next http.Handler) http.Handler {
 		} else if wrapper.statusCode >= 400 {
 			level = WARN
 		}
-		
+
 		if logger := GetGlobalLogger(); logger != nil {
 			logger.WithDuration(ctx, level, ComponentHTTP, ActionResponse, "HTTP request completed", duration, map[string]interface{}{
 				"method":      r.Method,
@@ -83,12 +83,12 @@ func CorrelationIDMiddleware(next http.Handler) http.Handler {
 		if correlationID == "" {
 			correlationID = NewCorrelationID()
 		}
-		
+
 		var requestCtx = r.Context()
 		ctx := WithCorrelationID(requestCtx, correlationID)
 		r = r.WithContext(ctx)
 		w.Header().Set("X-Correlation-ID", correlationID)
-		
+
 		next.ServeHTTP(w, r)
 	})
 }

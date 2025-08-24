@@ -10,22 +10,22 @@ import (
 // DistributedCoordinator provides a full implementation of CoordinatorService
 // with gossip-based membership, distributed hash ring, and inter-node communication
 type DistributedCoordinator struct {
-	config           ClusterConfig
-	localNodeID      string
-	
+	config      ClusterConfig
+	localNodeID string
+
 	// Core components
-	membership       *GossipMembership
-	hashRing        *HashRing
-	eventBus        *DistributedEventBus
-	
+	membership *GossipMembership
+	hashRing   *HashRing
+	eventBus   *DistributedEventBus
+
 	// State management
-	startTime       time.Time
-	running         bool
-	runMu           sync.RWMutex
-	
+	startTime time.Time
+	running   bool
+	runMu     sync.RWMutex
+
 	// Lifecycle monitoring
-	lastHeartbeat   time.Time
-	healthMu        sync.RWMutex
+	lastHeartbeat time.Time
+	healthMu      sync.RWMutex
 }
 
 // NewDistributedCoordinator creates a new distributed coordinator
@@ -33,19 +33,19 @@ func NewDistributedCoordinator(config ClusterConfig) (*DistributedCoordinator, e
 	if err := ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-	
+
 	// Create membership provider
 	membership, err := NewGossipMembership(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create membership provider: %w", err)
 	}
-	
+
 	// Create hash ring
 	hashRing := NewHashRing(config.HashRing)
-	
+
 	// Create event bus
 	eventBus := NewDistributedEventBus(config.NodeID, membership)
-	
+
 	coordinator := &DistributedCoordinator{
 		config:        config,
 		localNodeID:   config.NodeID,
@@ -54,7 +54,7 @@ func NewDistributedCoordinator(config ClusterConfig) (*DistributedCoordinator, e
 		eventBus:      eventBus,
 		lastHeartbeat: time.Now(),
 	}
-	
+
 	return coordinator, nil
 }
 
@@ -62,24 +62,24 @@ func NewDistributedCoordinator(config ClusterConfig) (*DistributedCoordinator, e
 func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 	dc.runMu.Lock()
 	defer dc.runMu.Unlock()
-	
+
 	if dc.running {
 		return fmt.Errorf("coordinator already running")
 	}
-	
+
 	dc.startTime = time.Now()
-	
+
 	// Start membership provider
 	if err := dc.membership.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start membership provider: %w", err)
 	}
-	
+
 	// Start event bus
 	if err := dc.eventBus.Start(ctx); err != nil {
 		dc.membership.Stop(ctx) // Cleanup
 		return fmt.Errorf("failed to start event bus: %w", err)
 	}
-	
+
 	// Add local node to hash ring
 	err := dc.hashRing.AddNode(
 		dc.localNodeID,
@@ -91,7 +91,7 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 		dc.eventBus.Stop(ctx)
 		return fmt.Errorf("failed to add local node to hash ring: %w", err)
 	}
-	
+
 	// Join cluster if seed nodes are provided
 	if len(dc.config.SeedNodes) > 0 {
 		if err := dc.membership.Join(ctx, dc.config.SeedNodes); err != nil {
@@ -99,13 +99,13 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 			// Don't fail startup - we can operate as a single node
 		}
 	}
-	
+
 	// Start background processes
 	go dc.membershipSync(ctx)
 	go dc.heartbeatLoop(ctx)
-	
+
 	dc.running = true
-	
+
 	// Publish startup event
 	startupEvent := ClusterEvent{
 		Type:      EventTopologyChanged,
@@ -114,9 +114,9 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 		Timestamp: time.Now(),
 	}
 	dc.eventBus.Publish(ctx, startupEvent)
-	
+
 	fmt.Printf("Distributed coordinator started: %s\n", dc.localNodeID)
-	
+
 	return nil
 }
 
@@ -124,13 +124,13 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 func (dc *DistributedCoordinator) Stop(ctx context.Context) error {
 	dc.runMu.Lock()
 	defer dc.runMu.Unlock()
-	
+
 	if !dc.running {
 		return nil
 	}
-	
+
 	dc.running = false
-	
+
 	// Publish shutdown event
 	shutdownEvent := ClusterEvent{
 		Type:      EventTopologyChanged,
@@ -139,16 +139,16 @@ func (dc *DistributedCoordinator) Stop(ctx context.Context) error {
 		Timestamp: time.Now(),
 	}
 	dc.eventBus.Publish(ctx, shutdownEvent)
-	
+
 	// Stop components in reverse order
 	dc.eventBus.Stop(ctx)
 	dc.membership.Stop(ctx)
-	
+
 	// Remove local node from hash ring
 	dc.hashRing.RemoveNode(dc.localNodeID)
-	
+
 	fmt.Printf("Distributed coordinator stopped: %s\n", dc.localNodeID)
-	
+
 	return nil
 }
 
@@ -181,7 +181,7 @@ func (dc *DistributedCoordinator) TriggerRebalance(ctx context.Context) error {
 		Data:      "manual_trigger",
 		Timestamp: time.Now(),
 	}
-	
+
 	return dc.eventBus.Publish(ctx, rebalanceEvent)
 }
 
@@ -191,7 +191,7 @@ func (dc *DistributedCoordinator) GetHealth() CoordinatorHealth {
 	dc.healthMu.RLock()
 	defer dc.runMu.RUnlock()
 	defer dc.healthMu.RUnlock()
-	
+
 	health := CoordinatorHealth{
 		Healthy:          dc.running && dc.membership.IsHealthy(),
 		LocalNodeID:      dc.localNodeID,
@@ -201,24 +201,24 @@ func (dc *DistributedCoordinator) GetHealth() CoordinatorHealth {
 		Uptime:           time.Since(dc.startTime),
 		Issues:           []string{},
 	}
-	
+
 	// Check for issues
 	if !dc.membership.IsHealthy() {
 		health.Issues = append(health.Issues, "membership provider unhealthy")
 		health.Healthy = false
 	}
-	
+
 	if time.Since(dc.lastHeartbeat) > time.Duration(dc.config.FailureDetectionTimeout)*time.Second {
 		health.Issues = append(health.Issues, "heartbeat timeout")
 		health.Healthy = false
 	}
-	
+
 	aliveMembers := dc.membership.GetAliveNodes()
 	if len(aliveMembers) == 0 {
 		health.Issues = append(health.Issues, "no alive cluster members")
 		health.Healthy = false
 	}
-	
+
 	return health
 }
 
@@ -236,7 +236,7 @@ func (dc *DistributedCoordinator) GetMetrics() CoordinatorMetrics {
 // membershipSync synchronizes membership changes with the hash ring
 func (dc *DistributedCoordinator) membershipSync(ctx context.Context) {
 	membershipEvents := dc.membership.Subscribe()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -245,7 +245,7 @@ func (dc *DistributedCoordinator) membershipSync(ctx context.Context) {
 			if !ok {
 				return // Channel closed
 			}
-			
+
 			dc.handleMembershipEvent(ctx, event)
 		}
 	}
@@ -254,7 +254,7 @@ func (dc *DistributedCoordinator) membershipSync(ctx context.Context) {
 // handleMembershipEvent processes membership changes and updates hash ring
 func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, event MembershipEvent) {
 	member := event.Member
-	
+
 	switch event.Type {
 	case MemberJoined:
 		// Add node to hash ring
@@ -263,9 +263,9 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 			fmt.Printf("Failed to add node to hash ring: %s - %v\n", member.NodeID, err)
 			return
 		}
-		
+
 		fmt.Printf("Added node to hash ring: %s (%s:%d)\n", member.NodeID, member.Address, member.Port)
-		
+
 		// Publish topology change event
 		topologyEvent := ClusterEvent{
 			Type:      EventTopologyChanged,
@@ -274,7 +274,7 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 			Timestamp: time.Now(),
 		}
 		dc.eventBus.Publish(ctx, topologyEvent)
-		
+
 	case MemberLeft, MemberFailed:
 		// Remove node from hash ring
 		err := dc.hashRing.RemoveNode(member.NodeID)
@@ -282,9 +282,9 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 			fmt.Printf("Failed to remove node from hash ring: %s - %v\n", member.NodeID, err)
 			return
 		}
-		
+
 		fmt.Printf("Removed node from hash ring: %s\n", member.NodeID)
-		
+
 		// Publish topology change event
 		topologyEvent := ClusterEvent{
 			Type:      EventTopologyChanged,
@@ -293,7 +293,7 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 			Timestamp: time.Now(),
 		}
 		dc.eventBus.Publish(ctx, topologyEvent)
-		
+
 	case MemberRecovered:
 		// Update node status in hash ring
 		err := dc.hashRing.SetNodeStatus(member.NodeID, NodeAlive)
@@ -301,9 +301,9 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 			fmt.Printf("Failed to update node status: %s - %v\n", member.NodeID, err)
 			return
 		}
-		
+
 		fmt.Printf("Node recovered: %s\n", member.NodeID)
-		
+
 	case MemberUpdated:
 		// Node metadata updated - no hash ring changes needed
 		fmt.Printf("Node metadata updated: %s\n", member.NodeID)
@@ -314,7 +314,7 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 func (dc *DistributedCoordinator) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(dc.config.HeartbeatInterval) * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -323,13 +323,13 @@ func (dc *DistributedCoordinator) heartbeatLoop(ctx context.Context) {
 			dc.healthMu.Lock()
 			dc.lastHeartbeat = time.Now()
 			dc.healthMu.Unlock()
-			
+
 			// Update node load in hash ring (simplified metric)
 			nodeCount := len(dc.membership.GetAliveNodes())
 			load := 1.0 / float64(max(nodeCount, 1)) // Simple load distribution
-			
+
 			dc.hashRing.UpdateNodeLoad(dc.localNodeID, load)
-			
+
 			// Check if we should continue
 			dc.runMu.RLock()
 			if !dc.running {
@@ -346,15 +346,15 @@ func (dc *DistributedCoordinator) isConnectedToSeeds() bool {
 	if len(dc.config.SeedNodes) == 0 {
 		return true // No seeds required
 	}
-	
+
 	members := dc.membership.GetAliveNodes()
 	seedAddresses := make(map[string]bool)
-	
+
 	// Create a set of seed addresses
 	for _, seed := range dc.config.SeedNodes {
 		seedAddresses[seed] = true
 	}
-	
+
 	// Check if any alive member is a seed
 	for _, member := range members {
 		memberAddr := fmt.Sprintf("%s:%d", member.Address, member.Port)
@@ -362,7 +362,7 @@ func (dc *DistributedCoordinator) isConnectedToSeeds() bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

@@ -13,16 +13,16 @@ import (
 type DistributedEventBus struct {
 	nodeID     string
 	membership *GossipMembership
-	
+
 	// Event subscriptions
 	subscribers map[chan ClusterEvent][]ClusterEventType
 	subsMu      sync.RWMutex
-	
+
 	// Metrics
 	eventsPublished int64
 	eventsReceived  int64
 	metricsMu       sync.RWMutex
-	
+
 	// Lifecycle
 	running bool
 	runMu   sync.RWMutex
@@ -41,19 +41,19 @@ func NewDistributedEventBus(nodeID string, membership *GossipMembership) *Distri
 func (deb *DistributedEventBus) Start(ctx context.Context) error {
 	deb.runMu.Lock()
 	defer deb.runMu.Unlock()
-	
+
 	if deb.running {
 		return fmt.Errorf("event bus already running")
 	}
-	
+
 	deb.running = true
-	
+
 	// Register with gossip membership to receive user events
 	deb.membership.SetUserEventHandler(deb.processIncomingGossipEvent)
-	
+
 	// Start listening for gossip events that represent cluster events
 	go deb.listenForGossipEvents(ctx)
-	
+
 	return nil
 }
 
@@ -61,13 +61,13 @@ func (deb *DistributedEventBus) Start(ctx context.Context) error {
 func (deb *DistributedEventBus) Stop(ctx context.Context) error {
 	deb.runMu.Lock()
 	defer deb.runMu.Unlock()
-	
+
 	if !deb.running {
 		return nil
 	}
-	
+
 	deb.running = false
-	
+
 	// Close all subscriber channels
 	deb.subsMu.Lock()
 	for ch := range deb.subscribers {
@@ -75,7 +75,7 @@ func (deb *DistributedEventBus) Stop(ctx context.Context) error {
 	}
 	deb.subscribers = make(map[chan ClusterEvent][]ClusterEventType)
 	deb.subsMu.Unlock()
-	
+
 	return nil
 }
 
@@ -85,10 +85,10 @@ func (deb *DistributedEventBus) Publish(ctx context.Context, event ClusterEvent)
 	deb.metricsMu.Lock()
 	deb.eventsPublished++
 	deb.metricsMu.Unlock()
-	
+
 	// First, deliver to local subscribers
 	deb.deliverLocalEvent(event)
-	
+
 	// Then, send to other nodes via gossip
 	return deb.publishToCluster(event)
 }
@@ -96,11 +96,11 @@ func (deb *DistributedEventBus) Publish(ctx context.Context, event ClusterEvent)
 // Subscribe implements EventBus.Subscribe
 func (deb *DistributedEventBus) Subscribe(eventTypes ...ClusterEventType) <-chan ClusterEvent {
 	ch := make(chan ClusterEvent, 100)
-	
+
 	deb.subsMu.Lock()
 	deb.subscribers[ch] = eventTypes
 	deb.subsMu.Unlock()
-	
+
 	return ch
 }
 
@@ -108,7 +108,7 @@ func (deb *DistributedEventBus) Subscribe(eventTypes ...ClusterEventType) <-chan
 func (deb *DistributedEventBus) Unsubscribe(ch <-chan ClusterEvent) {
 	deb.subsMu.Lock()
 	defer deb.subsMu.Unlock()
-	
+
 	// Find and remove the channel
 	for subscriberCh := range deb.subscribers {
 		if subscriberCh == ch {
@@ -125,12 +125,12 @@ func (deb *DistributedEventBus) GetMetrics() EventBusMetrics {
 	deb.metricsMu.RLock()
 	defer deb.subsMu.RUnlock()
 	defer deb.metricsMu.RUnlock()
-	
+
 	return EventBusMetrics{
 		EventsPublished:   deb.eventsPublished,
 		EventsReceived:    deb.eventsReceived,
 		ActiveSubscribers: len(deb.subscribers),
-		LastEventTime:     time.Now(), // Approximation
+		LastEventTime:     time.Now(),            // Approximation
 		AverageLatency:    time.Millisecond * 50, // Approximation
 	}
 }
@@ -142,16 +142,16 @@ func (deb *DistributedEventBus) publishToCluster(event ClusterEvent) error {
 	if err != nil {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
-	
+
 	// Create a gossip user event
 	gossipEventName := fmt.Sprintf("cluster-event:%s", event.Type)
-	
+
 	// Send via gossip to all nodes
 	err = deb.membership.SendUserEvent(gossipEventName, eventData)
 	if err != nil {
 		return fmt.Errorf("failed to send gossip event: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -159,9 +159,9 @@ func (deb *DistributedEventBus) publishToCluster(event ClusterEvent) error {
 func (deb *DistributedEventBus) deliverLocalEvent(event ClusterEvent) {
 	deb.subsMu.RLock()
 	defer deb.subsMu.RUnlock()
-	
+
 	fmt.Printf("[EVENT_BUS] Delivering local event to %d subscribers\n", len(deb.subscribers))
-	
+
 	for ch, eventTypes := range deb.subscribers {
 		// Check if subscriber is interested in this event type
 		interested := false
@@ -171,9 +171,9 @@ func (deb *DistributedEventBus) deliverLocalEvent(event ClusterEvent) {
 				break
 			}
 		}
-		
+
 		fmt.Printf("[EVENT_BUS] Subscriber interested in %v, event type: %s, interested: %t\n", eventTypes, event.Type, interested)
-		
+
 		if interested {
 			select {
 			case ch <- event:
@@ -190,13 +190,13 @@ func (deb *DistributedEventBus) deliverLocalEvent(event ClusterEvent) {
 func (deb *DistributedEventBus) listenForGossipEvents(ctx context.Context) {
 	// This is a simplified approach - in a full implementation, we'd need to
 	// integrate more deeply with the gossip membership to receive user events
-	
+
 	// For now, we'll focus on the framework and add full gossip event
 	// processing in the next iteration
-	
+
 	ticker := time.NewTicker(time.Second * 10)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -216,36 +216,36 @@ func (deb *DistributedEventBus) listenForGossipEvents(ctx context.Context) {
 // processIncomingGossipEvent handles incoming gossip events from other nodes
 func (deb *DistributedEventBus) processIncomingGossipEvent(eventName string, payload []byte) {
 	fmt.Printf("[EVENT_BUS] Processing gossip event: %s (payload: %s)\n", eventName, string(payload))
-	
+
 	// Parse the event type from the gossip event name
 	if !strings.HasPrefix(eventName, "cluster-event:") {
 		fmt.Printf("[EVENT_BUS] Ignoring non-cluster event: %s\n", eventName)
 		return // Not a cluster event
 	}
-	
+
 	// Deserialize the event
 	var event ClusterEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
 		fmt.Printf("[EVENT_BUS] Failed to deserialize cluster event: %v\n", err)
 		return
 	}
-	
-	fmt.Printf("[EVENT_BUS] Deserialized event: Type=%s, NodeID=%s, CorrelationID=%s, Data=%v\n", 
+
+	fmt.Printf("[EVENT_BUS] Deserialized event: Type=%s, NodeID=%s, CorrelationID=%s, Data=%v\n",
 		event.Type, event.NodeID, event.CorrelationID, event.Data)
-	
+
 	// Skip events from ourselves to avoid loops
 	if event.NodeID == deb.nodeID {
 		fmt.Printf("[EVENT_BUS] Skipping own event from node %s\n", event.NodeID)
 		return
 	}
-	
+
 	// Update metrics
 	deb.metricsMu.Lock()
 	deb.eventsReceived++
 	deb.metricsMu.Unlock()
-	
+
 	fmt.Printf("[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: %s)\n", event.CorrelationID)
-	
+
 	// Deliver to local subscribers (correlation ID is already preserved in the event)
 	deb.deliverLocalEvent(event)
 }
@@ -257,13 +257,13 @@ func (deb *DistributedEventBus) QueryCluster(queryName string, data interface{},
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize query data: %w", err)
 	}
-	
+
 	// Send query via gossip
 	responses, err := deb.membership.Query(queryName, payload, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("cluster query failed: %w", err)
 	}
-	
+
 	// Deserialize responses
 	var results []interface{}
 	for _, response := range responses {
@@ -274,7 +274,7 @@ func (deb *DistributedEventBus) QueryCluster(queryName string, data interface{},
 		}
 		results = append(results, result)
 	}
-	
+
 	return results, nil
 }
 
@@ -286,7 +286,7 @@ func (deb *DistributedEventBus) PublishRebalanceEvent(ctx context.Context, event
 		Data:      details,
 		Timestamp: time.Now(),
 	}
-	
+
 	return deb.Publish(ctx, event)
 }
 
@@ -296,13 +296,13 @@ func (deb *DistributedEventBus) PublishTopologyChangeEvent(ctx context.Context, 
 		Type:   EventTopologyChanged,
 		NodeID: deb.nodeID,
 		Data: map[string]interface{}{
-			"change_type":    changeType,
-			"affected_node":  affectedNode,
-			"cluster_size":   len(deb.membership.GetAliveNodes()),
+			"change_type":   changeType,
+			"affected_node": affectedNode,
+			"cluster_size":  len(deb.membership.GetAliveNodes()),
 		},
 		Timestamp: time.Now(),
 	}
-	
+
 	return deb.Publish(ctx, event)
 }
 
@@ -310,23 +310,23 @@ func (deb *DistributedEventBus) PublishTopologyChangeEvent(ctx context.Context, 
 func (deb *DistributedEventBus) GetClusterHealth(ctx context.Context) (map[string]interface{}, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
-	
+
 	responses, err := deb.QueryCluster("health-check", map[string]interface{}{
 		"requestor": deb.nodeID,
 		"timestamp": time.Now(),
 	}, time.Second*5)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("cluster health query failed: %w", err)
 	}
-	
+
 	// Aggregate health information
 	clusterHealth := map[string]interface{}{
-		"total_nodes":     len(deb.membership.GetMembers()),
+		"total_nodes":      len(deb.membership.GetMembers()),
 		"responding_nodes": len(responses),
 		"health_responses": responses,
-		"query_timestamp": time.Now(),
+		"query_timestamp":  time.Now(),
 	}
-	
+
 	return clusterHealth, nil
 }

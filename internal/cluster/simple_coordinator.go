@@ -15,21 +15,21 @@ type SimpleCoordinator struct {
 	config      ClusterConfig
 	localNodeID string
 	hashRing    *HashRing
-	
+
 	// Event handling
-	eventSubs   map[chan ClusterEvent][]ClusterEventType
-	memberSubs  []chan<- MembershipEvent
-	eventMu     sync.RWMutex
-	
+	eventSubs  map[chan ClusterEvent][]ClusterEventType
+	memberSubs []chan<- MembershipEvent
+	eventMu    sync.RWMutex
+
 	// Lifecycle
-	startTime   time.Time
-	running     bool
-	runMu       sync.RWMutex
-	
+	startTime time.Time
+	running   bool
+	runMu     sync.RWMutex
+
 	// Health monitoring
 	lastHeartbeat time.Time
 	healthMu      sync.RWMutex
-	
+
 	// Metrics
 	eventsPublished int64
 	eventsReceived  int64
@@ -41,9 +41,9 @@ func NewSimpleCoordinator(config ClusterConfig) (*SimpleCoordinator, error) {
 	if err := ValidateConfig(config); err != nil {
 		return nil, err
 	}
-	
+
 	hashRing := NewHashRing(config.HashRing)
-	
+
 	coordinator := &SimpleCoordinator{
 		config:        config,
 		localNodeID:   config.NodeID,
@@ -52,7 +52,7 @@ func NewSimpleCoordinator(config ClusterConfig) (*SimpleCoordinator, error) {
 		memberSubs:    make([]chan<- MembershipEvent, 0),
 		lastHeartbeat: time.Now(),
 	}
-	
+
 	return coordinator, nil
 }
 
@@ -60,14 +60,14 @@ func NewSimpleCoordinator(config ClusterConfig) (*SimpleCoordinator, error) {
 func (c *SimpleCoordinator) Start(ctx context.Context) error {
 	c.runMu.Lock()
 	defer c.runMu.Unlock()
-	
+
 	if c.running {
 		return fmt.Errorf("coordinator already running")
 	}
-	
+
 	c.startTime = time.Now()
 	c.running = true
-	
+
 	// Add local node to hash ring
 	err := c.hashRing.AddNode(
 		c.localNodeID,
@@ -78,10 +78,10 @@ func (c *SimpleCoordinator) Start(ctx context.Context) error {
 		c.running = false
 		return fmt.Errorf("failed to add local node to ring: %w", err)
 	}
-	
+
 	// Start background heartbeat
 	go c.heartbeatLoop(ctx)
-	
+
 	return nil
 }
 
@@ -89,29 +89,29 @@ func (c *SimpleCoordinator) Start(ctx context.Context) error {
 func (c *SimpleCoordinator) Stop(ctx context.Context) error {
 	c.runMu.Lock()
 	defer c.runMu.Unlock()
-	
+
 	if !c.running {
 		return nil
 	}
-	
+
 	c.running = false
-	
+
 	// Remove local node from hash ring
 	c.hashRing.RemoveNode(c.localNodeID)
-	
+
 	// Close event channels
 	c.eventMu.Lock()
 	for ch := range c.eventSubs {
 		close(ch)
 	}
 	c.eventSubs = make(map[chan ClusterEvent][]ClusterEventType)
-	
+
 	for _, ch := range c.memberSubs {
 		close(ch)
 	}
 	c.memberSubs = nil
 	c.eventMu.Unlock()
-	
+
 	return nil
 }
 
@@ -144,7 +144,7 @@ func (c *SimpleCoordinator) TriggerRebalance(ctx context.Context) error {
 		NodeID:    c.localNodeID,
 		Timestamp: time.Now(),
 	}
-	
+
 	return c.publishEvent(ctx, event)
 }
 
@@ -154,7 +154,7 @@ func (c *SimpleCoordinator) GetHealth() CoordinatorHealth {
 	c.healthMu.RLock()
 	defer c.runMu.RUnlock()
 	defer c.healthMu.RUnlock()
-	
+
 	health := CoordinatorHealth{
 		Healthy:          c.running && time.Since(c.lastHeartbeat) < time.Duration(c.config.FailureDetectionTimeout)*time.Second,
 		LocalNodeID:      c.localNodeID,
@@ -164,16 +164,16 @@ func (c *SimpleCoordinator) GetHealth() CoordinatorHealth {
 		Uptime:           time.Since(c.startTime),
 		Issues:           []string{},
 	}
-	
+
 	if !health.Healthy {
 		health.Issues = append(health.Issues, "heartbeat timeout")
 	}
-	
+
 	if c.hashRing.NodeCount() == 0 {
 		health.Issues = append(health.Issues, "no nodes in cluster")
 		health.Healthy = false
 	}
-	
+
 	return health
 }
 
@@ -181,7 +181,7 @@ func (c *SimpleCoordinator) GetHealth() CoordinatorHealth {
 func (c *SimpleCoordinator) GetMetrics() CoordinatorMetrics {
 	c.metricsMu.RLock()
 	defer c.metricsMu.RUnlock()
-	
+
 	return CoordinatorMetrics{
 		Membership: MembershipMetrics{
 			TotalMembers:   c.hashRing.NodeCount(),
@@ -199,7 +199,7 @@ func (c *SimpleCoordinator) GetMetrics() CoordinatorMetrics {
 func (c *SimpleCoordinator) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(c.config.HeartbeatInterval) * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -208,7 +208,7 @@ func (c *SimpleCoordinator) heartbeatLoop(ctx context.Context) {
 			c.healthMu.Lock()
 			c.lastHeartbeat = time.Now()
 			c.healthMu.Unlock()
-			
+
 			// Check if we should continue
 			c.runMu.RLock()
 			if !c.running {
@@ -224,11 +224,11 @@ func (c *SimpleCoordinator) heartbeatLoop(ctx context.Context) {
 func (c *SimpleCoordinator) publishEvent(ctx context.Context, event ClusterEvent) error {
 	c.eventMu.RLock()
 	defer c.eventMu.RUnlock()
-	
+
 	c.metricsMu.Lock()
 	c.eventsPublished++
 	c.metricsMu.Unlock()
-	
+
 	for ch, eventTypes := range c.eventSubs {
 		// Check if subscriber is interested in this event type
 		interested := false
@@ -238,7 +238,7 @@ func (c *SimpleCoordinator) publishEvent(ctx context.Context, event ClusterEvent
 				break
 			}
 		}
-		
+
 		if interested {
 			select {
 			case ch <- event:
@@ -249,7 +249,7 @@ func (c *SimpleCoordinator) publishEvent(ctx context.Context, event ClusterEvent
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -270,7 +270,7 @@ func (m *simpleMembership) Leave(ctx context.Context) error {
 func (m *simpleMembership) GetMembers() []ClusterMember {
 	nodes := m.coordinator.hashRing.GetNodes()
 	members := make([]ClusterMember, 0, len(nodes))
-	
+
 	for _, node := range nodes {
 		member := ClusterMember{
 			NodeID:   node.ID,
@@ -283,7 +283,7 @@ func (m *simpleMembership) GetMembers() []ClusterMember {
 		}
 		members = append(members, member)
 	}
-	
+
 	return members
 }
 
@@ -304,11 +304,11 @@ func (m *simpleMembership) UpdateMetadata(metadata map[string]string) error {
 
 func (m *simpleMembership) Subscribe() <-chan MembershipEvent {
 	ch := make(chan MembershipEvent, 100)
-	
+
 	m.coordinator.eventMu.Lock()
 	m.coordinator.memberSubs = append(m.coordinator.memberSubs, ch)
 	m.coordinator.eventMu.Unlock()
-	
+
 	return ch
 }
 
@@ -386,18 +386,18 @@ func (e *simpleEventBus) Publish(ctx context.Context, event ClusterEvent) error 
 
 func (e *simpleEventBus) Subscribe(eventTypes ...ClusterEventType) <-chan ClusterEvent {
 	ch := make(chan ClusterEvent, 100)
-	
+
 	e.coordinator.eventMu.Lock()
 	e.coordinator.eventSubs[ch] = eventTypes
 	e.coordinator.eventMu.Unlock()
-	
+
 	return ch
 }
 
 func (e *simpleEventBus) Unsubscribe(ch <-chan ClusterEvent) {
 	e.coordinator.eventMu.Lock()
 	defer e.coordinator.eventMu.Unlock()
-	
+
 	// Find and remove the channel
 	for eventCh := range e.coordinator.eventSubs {
 		if eventCh == ch {
@@ -411,7 +411,7 @@ func (e *simpleEventBus) Unsubscribe(ch <-chan ClusterEvent) {
 func (e *simpleEventBus) GetMetrics() EventBusMetrics {
 	e.coordinator.metricsMu.RLock()
 	defer e.coordinator.metricsMu.RUnlock()
-	
+
 	return EventBusMetrics{
 		EventsPublished:   e.coordinator.eventsPublished,
 		EventsReceived:    e.coordinator.eventsReceived,

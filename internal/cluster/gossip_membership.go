@@ -17,18 +17,18 @@ type GossipMembership struct {
 	serf       *serf.Serf
 	eventCh    chan serf.Event
 	memberSubs []chan<- MembershipEvent
-	
+
 	// State management
 	members     map[string]*ClusterMember
 	localMember *ClusterMember
-	
+
 	// User event handler
 	userEventHandler func(eventName string, payload []byte)
-	
+
 	// Synchronization
-	mu         sync.RWMutex
-	subsMu     sync.RWMutex
-	
+	mu     sync.RWMutex
+	subsMu sync.RWMutex
+
 	// Metrics
 	metrics    MembershipMetrics
 	startTime  time.Time
@@ -40,29 +40,29 @@ func NewGossipMembership(config ClusterConfig) (*GossipMembership, error) {
 	if err := ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-	
+
 	gm := &GossipMembership{
-		config:     config,
-		eventCh:    make(chan serf.Event, 256),
-		members:    make(map[string]*ClusterMember),
-		startTime:  time.Now(),
+		config:    config,
+		eventCh:   make(chan serf.Event, 256),
+		members:   make(map[string]*ClusterMember),
+		startTime: time.Now(),
 	}
-	
+
 	// Create local member representation
 	gm.localMember = &ClusterMember{
-		NodeID:   config.NodeID,
-		Address:  config.AdvertiseAddress,
-		Port:     config.BindPort,
-		Status:   NodeAlive,
+		NodeID:  config.NodeID,
+		Address: config.AdvertiseAddress,
+		Port:    config.BindPort,
+		Status:  NodeAlive,
 		Metadata: map[string]string{
-			"cluster":     config.ClusterName,
-			"version":     "1.0.0",
+			"cluster":      config.ClusterName,
+			"version":      "1.0.0",
 			"capabilities": "filters,persistence,resp",
 		},
 		JoinedAt: time.Now(),
 		LastSeen: time.Now(),
 	}
-	
+
 	return gm, nil
 }
 
@@ -71,43 +71,43 @@ func (gm *GossipMembership) Start(ctx context.Context) error {
 	// Create Serf configuration
 	conf := serf.DefaultConfig()
 	conf.Init()
-	
+
 	// Set basic configuration
 	conf.NodeName = gm.config.NodeID
 	conf.MemberlistConfig.BindAddr = gm.config.BindAddress
 	conf.MemberlistConfig.BindPort = gm.config.BindPort
-	
+
 	// Set advertise address if specified
 	if gm.config.AdvertiseAddress != "" {
 		conf.MemberlistConfig.AdvertiseAddr = gm.config.AdvertiseAddress
 		conf.MemberlistConfig.AdvertisePort = gm.config.BindPort
 	}
-	
+
 	// Configure event handling
 	conf.EventCh = gm.eventCh
-	
+
 	// Configure gossip intervals
 	conf.MemberlistConfig.GossipInterval = time.Duration(gm.config.HeartbeatInterval) * time.Second
-	
+
 	// Set tags (metadata)
 	conf.Tags = gm.localMember.Metadata
-	
+
 	// Create Serf instance
 	serfInstance, err := serf.Create(conf)
 	if err != nil {
 		return fmt.Errorf("failed to create serf instance: %w", err)
 	}
-	
+
 	gm.serf = serfInstance
-	
+
 	// Start event processing
 	go gm.processEvents(ctx)
-	
+
 	// Add self to members
 	gm.mu.Lock()
 	gm.members[gm.config.NodeID] = gm.localMember
 	gm.mu.Unlock()
-	
+
 	return nil
 }
 
@@ -120,14 +120,14 @@ func (gm *GossipMembership) Stop(ctx context.Context) error {
 			// Log error but continue shutdown
 			fmt.Printf("Error leaving serf cluster: %v\n", err)
 		}
-		
+
 		// Shutdown serf
 		err = gm.serf.Shutdown()
 		if err != nil {
 			return fmt.Errorf("failed to shutdown serf: %w", err)
 		}
 	}
-	
+
 	// Close event subscriptions
 	gm.subsMu.Lock()
 	for _, ch := range gm.memberSubs {
@@ -135,7 +135,7 @@ func (gm *GossipMembership) Stop(ctx context.Context) error {
 	}
 	gm.memberSubs = nil
 	gm.subsMu.Unlock()
-	
+
 	return nil
 }
 
@@ -144,16 +144,16 @@ func (gm *GossipMembership) Join(ctx context.Context, seedNodes []string) error 
 	if gm.serf == nil {
 		return fmt.Errorf("membership provider not started")
 	}
-	
+
 	if len(seedNodes) == 0 {
 		// No seed nodes - this is the first node or we're bootstrapping
 		return nil
 	}
-	
+
 	// Join the cluster using seed nodes
 	joinCtx, cancel := context.WithTimeout(ctx, time.Duration(gm.config.JoinTimeout)*time.Second)
 	defer cancel()
-	
+
 	// Try to join each seed node
 	var lastErr error
 	for _, seedAddr := range seedNodes {
@@ -162,7 +162,7 @@ func (gm *GossipMembership) Join(ctx context.Context, seedNodes []string) error 
 			return fmt.Errorf("join timeout: %w", joinCtx.Err())
 		default:
 		}
-		
+
 		// Try to join this seed node
 		fmt.Printf("Attempting to join cluster via %s...\n", seedAddr)
 		num, err := gm.serf.Join([]string{seedAddr}, false)
@@ -170,17 +170,17 @@ func (gm *GossipMembership) Join(ctx context.Context, seedNodes []string) error 
 			lastErr = err
 			continue
 		}
-		
+
 		if num > 0 {
 			fmt.Printf("Successfully joined cluster via %s (%d members)\n", seedAddr, num)
 			return nil
 		}
 	}
-	
+
 	if lastErr != nil {
 		return fmt.Errorf("failed to join any seed nodes: %w", lastErr)
 	}
-	
+
 	return fmt.Errorf("no seed nodes responded")
 }
 
@@ -189,13 +189,13 @@ func (gm *GossipMembership) Leave(ctx context.Context) error {
 	if gm.serf == nil {
 		return fmt.Errorf("membership provider not started")
 	}
-	
+
 	// Leave gracefully
 	err := gm.serf.Leave()
 	if err != nil {
 		return fmt.Errorf("failed to leave cluster: %w", err)
 	}
-	
+
 	return gm.Stop(ctx)
 }
 
@@ -203,14 +203,14 @@ func (gm *GossipMembership) Leave(ctx context.Context) error {
 func (gm *GossipMembership) GetMembers() []ClusterMember {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
-	
+
 	members := make([]ClusterMember, 0, len(gm.members))
 	for _, member := range gm.members {
 		// Create a copy to avoid external modifications
 		memberCopy := *member
 		members = append(members, memberCopy)
 	}
-	
+
 	return members
 }
 
@@ -218,12 +218,12 @@ func (gm *GossipMembership) GetMembers() []ClusterMember {
 func (gm *GossipMembership) GetMember(nodeID string) (*ClusterMember, bool) {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
-	
+
 	member, exists := gm.members[nodeID]
 	if !exists {
 		return nil, false
 	}
-	
+
 	// Return a copy
 	memberCopy := *member
 	return &memberCopy, true
@@ -234,14 +234,14 @@ func (gm *GossipMembership) UpdateMetadata(metadata map[string]string) error {
 	if gm.serf == nil {
 		return fmt.Errorf("membership provider not started")
 	}
-	
+
 	// Update local metadata
 	gm.mu.Lock()
 	for key, value := range metadata {
 		gm.localMember.Metadata[key] = value
 	}
 	gm.mu.Unlock()
-	
+
 	// Update serf tags (this will gossip the changes)
 	return gm.serf.SetTags(gm.localMember.Metadata)
 }
@@ -249,11 +249,11 @@ func (gm *GossipMembership) UpdateMetadata(metadata map[string]string) error {
 // Subscribe implements MembershipProvider.Subscribe
 func (gm *GossipMembership) Subscribe() <-chan MembershipEvent {
 	ch := make(chan MembershipEvent, 100)
-	
+
 	gm.subsMu.Lock()
 	gm.memberSubs = append(gm.memberSubs, ch)
 	gm.subsMu.Unlock()
-	
+
 	return ch
 }
 
@@ -261,12 +261,12 @@ func (gm *GossipMembership) Subscribe() <-chan MembershipEvent {
 func (gm *GossipMembership) GetMetrics() MembershipMetrics {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
-	
+
 	metrics := gm.metrics
 	metrics.TotalMembers = len(gm.members)
 	metrics.ClusterAge = time.Since(gm.startTime)
 	metrics.EventCount = gm.eventCount
-	
+
 	// Count members by status
 	for _, member := range gm.members {
 		switch member.Status {
@@ -278,7 +278,7 @@ func (gm *GossipMembership) GetMetrics() MembershipMetrics {
 			metrics.FailedMembers++
 		}
 	}
-	
+
 	return metrics
 }
 
@@ -287,12 +287,12 @@ func (gm *GossipMembership) IsHealthy() bool {
 	if gm.serf == nil {
 		return false
 	}
-	
+
 	// Check if we have a reasonable number of members
 	gm.mu.RLock()
 	memberCount := len(gm.members)
 	gm.mu.RUnlock()
-	
+
 	// Consider healthy if we have at least one member (ourselves) and serf is running
 	return memberCount > 0 && gm.serf.State() == serf.SerfAlive
 }
@@ -314,7 +314,7 @@ func (gm *GossipMembership) handleSerfEvent(event serf.Event) {
 	gm.mu.Lock()
 	gm.eventCount++
 	gm.mu.Unlock()
-	
+
 	switch e := event.(type) {
 	case serf.MemberEvent:
 		gm.handleMemberEvent(e)
@@ -344,38 +344,38 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 		Metadata: serfMember.Tags,
 		LastSeen: time.Now(),
 	}
-	
+
 	// Determine status and event type
 	var membershipEventType MembershipEventType
-	
+
 	switch eventType {
 	case serf.EventMemberJoin:
 		clusterMember.Status = NodeAlive
 		clusterMember.JoinedAt = time.Now()
 		membershipEventType = MemberJoined
-		
+
 		// Add to members map
 		gm.mu.Lock()
 		gm.members[clusterMember.NodeID] = clusterMember
 		gm.mu.Unlock()
-		
+
 		fmt.Printf("Node joined: %s (%s:%d)\n", clusterMember.NodeID, clusterMember.Address, clusterMember.Port)
-		
+
 	case serf.EventMemberLeave:
 		clusterMember.Status = NodeLeaving
 		membershipEventType = MemberLeft
-		
+
 		// Remove from members map
 		gm.mu.Lock()
 		delete(gm.members, clusterMember.NodeID)
 		gm.mu.Unlock()
-		
+
 		fmt.Printf("Node left: %s\n", clusterMember.NodeID)
-		
+
 	case serf.EventMemberFailed:
 		clusterMember.Status = NodeDead
 		membershipEventType = MemberFailed
-		
+
 		// Update status in members map
 		gm.mu.Lock()
 		if existing, exists := gm.members[clusterMember.NodeID]; exists {
@@ -383,13 +383,13 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 			existing.LastSeen = time.Now()
 		}
 		gm.mu.Unlock()
-		
+
 		fmt.Printf("Node failed: %s\n", clusterMember.NodeID)
-		
+
 	case serf.EventMemberUpdate:
 		clusterMember.Status = NodeAlive
 		membershipEventType = MemberUpdated
-		
+
 		// Update member in map
 		gm.mu.Lock()
 		if existing, exists := gm.members[clusterMember.NodeID]; exists {
@@ -397,30 +397,30 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 			existing.LastSeen = time.Now()
 		}
 		gm.mu.Unlock()
-		
+
 		fmt.Printf("Node updated: %s\n", clusterMember.NodeID)
-		
+
 	case serf.EventMemberReap:
 		// Member reaped (removed from failed state)
 		gm.mu.Lock()
 		delete(gm.members, clusterMember.NodeID)
 		gm.mu.Unlock()
-		
+
 		fmt.Printf("Node reaped: %s\n", clusterMember.NodeID)
 		return // Don't send event for reaping
-		
+
 	default:
 		fmt.Printf("Unknown member event type: %s\n", eventType)
 		return
 	}
-	
+
 	// Create membership event
 	membershipEvent := MembershipEvent{
 		Type:      membershipEventType,
 		Member:    *clusterMember,
 		Timestamp: time.Now(),
 	}
-	
+
 	// Notify subscribers
 	gm.notifySubscribers(membershipEvent)
 }
@@ -429,7 +429,7 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 func (gm *GossipMembership) notifySubscribers(event MembershipEvent) {
 	gm.subsMu.RLock()
 	defer gm.subsMu.RUnlock()
-	
+
 	for _, ch := range gm.memberSubs {
 		select {
 		case ch <- event:
@@ -443,7 +443,7 @@ func (gm *GossipMembership) notifySubscribers(event MembershipEvent) {
 // handleUserEvent processes custom user events
 func (gm *GossipMembership) handleUserEvent(event serf.UserEvent) {
 	fmt.Printf("[GOSSIP] User event received: %s (payload: %s)\n", event.Name, string(event.Payload))
-	
+
 	// Forward to registered handler if available
 	if gm.userEventHandler != nil {
 		gm.userEventHandler(event.Name, event.Payload)
@@ -454,15 +454,15 @@ func (gm *GossipMembership) handleUserEvent(event serf.UserEvent) {
 func (gm *GossipMembership) handleQuery(query *serf.Query) {
 	fmt.Printf("Query received: %s (payload: %s)\n", query.Name, string(query.Payload))
 	// Queries can be used for cluster-wide operations
-	
+
 	// Example: health check query
 	if query.Name == "health-check" {
 		response := map[string]interface{}{
-			"healthy":    gm.IsHealthy(),
-			"node_id":    gm.config.NodeID,
-			"timestamp":  time.Now(),
+			"healthy":   gm.IsHealthy(),
+			"node_id":   gm.config.NodeID,
+			"timestamp": time.Now(),
 		}
-		
+
 		// Send response (simplified - would normally serialize properly)
 		query.Respond([]byte(fmt.Sprintf("%+v", response)))
 	}
@@ -473,7 +473,7 @@ func (gm *GossipMembership) SendUserEvent(name string, payload []byte) error {
 	if gm.serf == nil {
 		return fmt.Errorf("membership provider not started")
 	}
-	
+
 	return gm.serf.UserEvent(name, payload, false)
 }
 
@@ -482,25 +482,25 @@ func (gm *GossipMembership) Query(name string, payload []byte, timeout time.Dura
 	if gm.serf == nil {
 		return nil, fmt.Errorf("membership provider not started")
 	}
-	
+
 	params := &serf.QueryParam{
 		FilterNodes: nil, // Send to all nodes
 		FilterTags:  nil, // No tag filtering
 		RequestAck:  true,
 		Timeout:     timeout,
 	}
-	
+
 	queryResult, err := gm.serf.Query(name, payload, params)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	
+
 	// Collect responses
 	var responses [][]byte
 	for response := range queryResult.ResponseCh() {
 		responses = append(responses, response.Payload)
 	}
-	
+
 	return responses, nil
 }
 
@@ -510,7 +510,7 @@ func (gm *GossipMembership) GetNodeAddress(nodeID string) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	
+
 	return net.JoinHostPort(member.Address, strconv.Itoa(member.Port)), true
 }
 
@@ -518,13 +518,13 @@ func (gm *GossipMembership) GetNodeAddress(nodeID string) (string, bool) {
 func (gm *GossipMembership) GetAliveNodes() []ClusterMember {
 	members := gm.GetMembers()
 	var aliveMembers []ClusterMember
-	
+
 	for _, member := range members {
 		if member.Status == NodeAlive {
 			aliveMembers = append(aliveMembers, member)
 		}
 	}
-	
+
 	return aliveMembers
 }
 

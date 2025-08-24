@@ -65,23 +65,23 @@ type LogEntry struct {
 
 // Logger represents the structured logger
 type Logger struct {
-	level     LogLevel
-	nodeID    string
-	writers   []io.Writer
-	mu        sync.RWMutex
-	logChan   chan LogEntry
-	done      chan struct{}
-	wg        sync.WaitGroup
+	level   LogLevel
+	nodeID  string
+	writers []io.Writer
+	mu      sync.RWMutex
+	logChan chan LogEntry
+	done    chan struct{}
+	wg      sync.WaitGroup
 }
 
 // Config for logger initialization
 type Config struct {
-	Level        LogLevel
-	NodeID       string
-	LogFile      string
+	Level         LogLevel
+	NodeID        string
+	LogFile       string
 	EnableConsole bool
-	EnableFile   bool
-	BufferSize   int
+	EnableFile    bool
+	BufferSize    int
 }
 
 // NewLogger creates a new structured logger instance
@@ -118,7 +118,7 @@ func NewLogger(config Config) *Logger {
 // processLogs handles asynchronous log writing
 func (l *Logger) processLogs() {
 	defer l.wg.Done()
-	
+
 	for {
 		select {
 		case entry := <-l.logChan:
@@ -306,7 +306,7 @@ func (l *Logger) Close() {
 	// Close file writers
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	for _, writer := range l.writers {
 		if closer, ok := writer.(io.Closer); ok && writer != os.Stdout && writer != os.Stderr {
 			closer.Close()

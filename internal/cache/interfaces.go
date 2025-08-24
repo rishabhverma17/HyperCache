@@ -34,7 +34,7 @@ type Cache interface {
 	CreateStore(name string, config StoreConfig) error
 	DropStore(name string) error
 	ListStores() []string
-	StoreStats(name string) (*StoreStats, error)  // Returns pointer to avoid copying large struct
+	StoreStats(name string) (*StoreStats, error) // Returns pointer to avoid copying large struct
 
 	// Cleanup
 	Close() error
@@ -51,12 +51,12 @@ type Store interface {
 	// Memory management
 	NeedsEviction() bool
 	Evict() (*Entry, error)
-	
+
 	// Metadata
 	Name() string
 	Size() int64
 	Stats() *StoreStats
-	
+
 	// Cleanup
 	Close() error
 }
@@ -65,13 +65,13 @@ type Store interface {
 type EvictionPolicy interface {
 	// Must be O(1) for cache performance
 	ShouldEvict(entry *Entry, memoryPressure float64) bool
-	OnAccess(entry *Entry)  // Update access patterns
-	OnInsert(entry *Entry)  // Handle new entries  
-	OnDelete(entry *Entry)  // Clean up tracking
-	
+	OnAccess(entry *Entry) // Update access patterns
+	OnInsert(entry *Entry) // Handle new entries
+	OnDelete(entry *Entry) // Clean up tracking
+
 	// Get next eviction candidate - MUST be O(1)
 	NextEvictionCandidate() *Entry
-	
+
 	// Policy metadata
 	PolicyName() string
 }
@@ -81,12 +81,12 @@ type MemoryPool interface {
 	// Memory management - O(1) operations
 	Allocate(size int64) ([]byte, error)
 	Free(ptr []byte) error
-	
+
 	// Memory status - O(1) operations
 	CurrentUsage() int64
 	MaxSize() int64
 	AvailableSpace() int64
-	
+
 	// Memory pressure calculation
 	MemoryPressure() float64 // 0.0 to 1.0
 }
@@ -101,25 +101,25 @@ type StoreConfig struct {
 
 // StoreStats provides metrics about store performance
 type StoreStats struct {
-	Name             string    `json:"name"`
-	EvictionPolicy   string    `json:"eviction_policy"`
-	
+	Name           string `json:"name"`
+	EvictionPolicy string `json:"eviction_policy"`
+
 	// Memory metrics
-	MaxMemory        int64     `json:"max_memory"`
-	CurrentMemory    int64     `json:"current_memory"`
-	MemoryPressure   float64   `json:"memory_pressure"`
-	
+	MaxMemory      int64   `json:"max_memory"`
+	CurrentMemory  int64   `json:"current_memory"`
+	MemoryPressure float64 `json:"memory_pressure"`
+
 	// Operation metrics
-	TotalEntries     int64     `json:"total_entries"`
-	Hits             int64     `json:"hits"`
-	Misses           int64     `json:"misses"`
-	Evictions        int64     `json:"evictions"`
-	
+	TotalEntries int64 `json:"total_entries"`
+	Hits         int64 `json:"hits"`
+	Misses       int64 `json:"misses"`
+	Evictions    int64 `json:"evictions"`
+
 	// Performance metrics
-	AvgGetLatency    time.Duration `json:"avg_get_latency"`
-	AvgPutLatency    time.Duration `json:"avg_put_latency"`
-	
+	AvgGetLatency time.Duration `json:"avg_get_latency"`
+	AvgPutLatency time.Duration `json:"avg_put_latency"`
+
 	// Time metrics
-	LastAccess       time.Time `json:"last_access"`
-	CreatedAt        time.Time `json:"created_at"`
+	LastAccess time.Time `json:"last_access"`
+	CreatedAt  time.Time `json:"created_at"`
 }

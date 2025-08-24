@@ -45,17 +45,17 @@ func InitializeFromConfig(nodeID string, logConfig LogConfig) (*Logger, error) {
 	}
 
 	config := Config{
-		Level:        LogLevelFromString(logConfig.Level),
-		NodeID:       nodeID,
-		LogFile:      logFile,
+		Level:         LogLevelFromString(logConfig.Level),
+		NodeID:        nodeID,
+		LogFile:       logFile,
 		EnableConsole: logConfig.EnableConsole,
-		EnableFile:   logConfig.EnableFile,
-		BufferSize:   logConfig.BufferSize,
+		EnableFile:    logConfig.EnableFile,
+		BufferSize:    logConfig.BufferSize,
 	}
 
 	logger := NewLogger(config)
 	SetGlobalLogger(logger)
-	
+
 	return logger, nil
 }
 
@@ -91,26 +91,26 @@ const (
 
 // ActionNames for structured logging
 const (
-	ActionStart         = "start"
-	ActionStop          = "stop"
-	ActionRequest       = "request"
-	ActionResponse      = "response"
-	ActionConnect       = "connect"
-	ActionDisconnect    = "disconnect"
-	ActionJoin          = "join"
-	ActionLeave         = "leave"
-	ActionReplication   = "replication"
-	ActionPersist       = "persist"
-	ActionRestore       = "restore"
-	ActionSnapshot      = "snapshot"
-	ActionCompaction    = "compaction"
-	ActionElection      = "election"
-	ActionConsensus     = "consensus"
-	ActionSync          = "sync"
-	ActionValidation    = "validation"
-	ActionTimeout       = "timeout"
-	ActionRetry         = "retry"
-	ActionFailover      = "failover"
-	ActionBackup        = "backup"
-	ActionCleanup       = "cleanup"
+	ActionStart       = "start"
+	ActionStop        = "stop"
+	ActionRequest     = "request"
+	ActionResponse    = "response"
+	ActionConnect     = "connect"
+	ActionDisconnect  = "disconnect"
+	ActionJoin        = "join"
+	ActionLeave       = "leave"
+	ActionReplication = "replication"
+	ActionPersist     = "persist"
+	ActionRestore     = "restore"
+	ActionSnapshot    = "snapshot"
+	ActionCompaction  = "compaction"
+	ActionElection    = "election"
+	ActionConsensus   = "consensus"
+	ActionSync        = "sync"
+	ActionValidation  = "validation"
+	ActionTimeout     = "timeout"
+	ActionRetry       = "retry"
+	ActionFailover    = "failover"
+	ActionBackup      = "backup"
+	ActionCleanup     = "cleanup"
 )

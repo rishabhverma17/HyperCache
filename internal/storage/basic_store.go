@@ -20,9 +20,9 @@ import (
 // CacheItem represents a single item in the cache with true memory integration
 type CacheItem struct {
 	Key          string
-	ValuePtr     []byte    // Points to actual allocated memory containing serialized value
-	ValueType    string    // Type information for deserialization  
-	Size         uint64    // Size of allocated memory
+	ValuePtr     []byte // Points to actual allocated memory containing serialized value
+	ValueType    string // Type information for deserialization
+	Size         uint64 // Size of allocated memory
 	CreatedAt    time.Time
 	ExpiresAt    time.Time
 	SessionID    string
@@ -42,13 +42,13 @@ func (item *CacheItem) IsExpired() bool {
 
 // BasicStoreConfig holds configuration for BasicStore
 type BasicStoreConfig struct {
-	Name               string
-	MaxMemory          uint64
-	DefaultTTL         time.Duration
-	EnableStatistics   bool
-	CleanupInterval    time.Duration
-	FilterConfig       *filter.FilterConfig       // Optional filter configuration (nil = no filter)
-	PersistenceConfig  *persistence.PersistenceConfig // Optional persistence configuration (nil = no persistence)
+	Name              string
+	MaxMemory         uint64
+	DefaultTTL        time.Duration
+	EnableStatistics  bool
+	CleanupInterval   time.Duration
+	FilterConfig      *filter.FilterConfig           // Optional filter configuration (nil = no filter)
+	PersistenceConfig *persistence.PersistenceConfig // Optional persistence configuration (nil = no persistence)
 }
 
 // BasicStoreStats holds statistics for the BasicStore
@@ -74,22 +74,22 @@ func (s *BasicStoreStats) HitRate() float64 {
 
 // BasicStore implements the Store interface with integrated MemoryPool, EvictionPolicy, and optional Filter
 type BasicStore struct {
-	config         BasicStoreConfig
-	items          map[string]*CacheItem
-	memPool        *MemoryPool
-	evictPolicy    cache.EvictionPolicy
-	filter         filter.ProbabilisticFilter  // Optional Cuckoo/Bloom filter for negative lookups
-	persistEngine  persistence.PersistenceEngine // Optional persistence layer
-	mutex          sync.RWMutex
-	stats          BasicStoreStats
-	stopCleanup    chan bool
-	allocatedPtrs  map[string][]byte // Track allocated pointers for proper cleanup
+	config        BasicStoreConfig
+	items         map[string]*CacheItem
+	memPool       *MemoryPool
+	evictPolicy   cache.EvictionPolicy
+	filter        filter.ProbabilisticFilter    // Optional Cuckoo/Bloom filter for negative lookups
+	persistEngine persistence.PersistenceEngine // Optional persistence layer
+	mutex         sync.RWMutex
+	stats         BasicStoreStats
+	stopCleanup   chan bool
+	allocatedPtrs map[string][]byte // Track allocated pointers for proper cleanup
 }
 
 // serializeValue converts interface{} values to []byte for storage in allocated memory
 func serializeValue(value interface{}) ([]byte, string, error) {
 	valueType := reflect.TypeOf(value).String()
-	
+
 	switch v := value.(type) {
 	case string:
 		return []byte(v), valueType, nil
@@ -280,7 +280,7 @@ func (s *BasicStore) SetWithContext(ctx context.Context, key string, value inter
 		// Restore context if needed
 		_ = originalLoggingContext
 	}()
-	
+
 	return s.setWithContextInternal(ctx, key, value, sessionID, ttl)
 }
 
@@ -377,15 +377,15 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 		if err := s.filter.Add([]byte(key)); err != nil {
 			// Log error but don't fail the Set operation
 			logging.Warn(nil, logging.ComponentFilter, "add_error", "Failed to add key to cuckoo filter", map[string]interface{}{
-				"key":   key,
-				"store": s.config.Name,
+				"key":         key,
+				"store":       s.config.Name,
 				"filter_type": "cuckoo",
-				"error": err.Error(),
+				"error":       err.Error(),
 			})
 		} else {
 			logging.Debug(ctx, logging.ComponentFilter, "add_success", "Key added to cuckoo filter", map[string]interface{}{
-				"key":   key,
-				"store": s.config.Name,
+				"key":         key,
+				"store":       s.config.Name,
 				"filter_type": "cuckoo",
 			})
 		}
@@ -434,8 +434,8 @@ func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, 
 		if !s.filter.Contains([]byte(key)) {
 			// Key definitely not in cache - early return
 			logging.Debug(ctx, logging.ComponentFilter, "negative_lookup", "Cuckoo filter early rejection", map[string]interface{}{
-				"key":   key,
-				"store": s.config.Name,
+				"key":         key,
+				"store":       s.config.Name,
 				"filter_type": "cuckoo",
 			})
 			s.incrementMissCount()
@@ -443,8 +443,8 @@ func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, 
 		}
 		// Key might be in cache (filter says possibly present)
 		logging.Debug(ctx, logging.ComponentFilter, "positive_lookup", "Cuckoo filter possible match", map[string]interface{}{
-			"key":   key,
-			"store": s.config.Name,
+			"key":         key,
+			"store":       s.config.Name,
 			"filter_type": "cuckoo",
 		})
 		// Continue with actual lookup
@@ -743,7 +743,7 @@ func (s *BasicStore) itemToEntry(key string, item *CacheItem) *cache.Entry {
 	} else {
 		valueBytes = []byte(fmt.Sprintf("%v", value))
 	}
-	
+
 	return &cache.Entry{
 		Key:       []byte(key),
 		Value:     valueBytes,
