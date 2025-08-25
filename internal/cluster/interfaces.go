@@ -17,6 +17,7 @@ type ClusterConfig struct {
 	BindAddress      string `yaml:"bind_address" json:"bind_address"`
 	BindPort         int    `yaml:"bind_port" json:"bind_port"`
 	AdvertiseAddress string `yaml:"advertise_address" json:"advertise_address"`
+	RESPPort         int    `yaml:"resp_port" json:"resp_port"` // RESP server port for client connections
 
 	// Seed nodes for bootstrap
 	SeedNodes []string `yaml:"seed_nodes" json:"seed_nodes"`
@@ -43,7 +44,8 @@ func DefaultClusterConfig() ClusterConfig {
 
 		BindAddress:      "0.0.0.0",
 		BindPort:         7946,
-		AdvertiseAddress: "", // Auto-detect
+		AdvertiseAddress: "",   // Auto-detect
+		RESPPort:         8080, // Default RESP port
 
 		SeedNodes: []string{},
 
@@ -174,7 +176,7 @@ type RoutingProvider interface {
 
 	// Get routing metrics
 	GetMetrics() HashRingMetrics
-	
+
 	// Redis-compatible slot-based routing
 	GetHashSlot(key string) uint16
 	GetNodeBySlot(slot uint16) (nodeID string, address string, port int)

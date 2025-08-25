@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"hypercache/internal/logging"
 
 	"github.com/cespare/xxhash/v2"
 )
@@ -189,7 +192,7 @@ func GetHashSlot(key string) uint16 {
 	// Redis hash slot calculation: CRC16(key) % 16384
 	// Look for hash tags {...} in the key
 	keyBytes := []byte(key)
-	
+
 	// Check for hash tags in the format {tag}
 	start := -1
 	for i, b := range keyBytes {
@@ -198,7 +201,7 @@ func GetHashSlot(key string) uint16 {
 			break
 		}
 	}
-	
+
 	if start != -1 {
 		// Found opening brace, look for closing brace
 		for i := start; i < len(keyBytes); i++ {
@@ -211,7 +214,7 @@ func GetHashSlot(key string) uint16 {
 			}
 		}
 	}
-	
+
 	return crc16(keyBytes) % RedisHashSlots
 }
 
@@ -261,7 +264,7 @@ func (ring *HashRing) AddNode(nodeID, address string, port int) error {
 
 	// Clear lookup cache (ring topology changed)
 	ring.clearLookupCache()
-	
+
 	// Redistribute hash slots for Redis-compatible routing
 	ring.redistributeSlots()
 
@@ -292,7 +295,7 @@ func (ring *HashRing) RemoveNode(nodeID string) error {
 
 	// Clear lookup cache
 	ring.clearLookupCache()
-	
+
 	// Redistribute hash slots for Redis-compatible routing
 	ring.redistributeSlots()
 
@@ -439,11 +442,11 @@ func (ring *HashRing) GetNodes() map[string]*Node {
 func (ring *HashRing) GetNodeBySlot(slot uint16) string {
 	ring.mu.RLock()
 	defer ring.mu.RUnlock()
-	
+
 	if slot >= RedisHashSlots {
 		return ""
 	}
-	
+
 	return ring.slotMap[slot]
 }
 
@@ -457,21 +460,21 @@ func (ring *HashRing) GetNodeByKey(key string) string {
 func (ring *HashRing) GetSlotsByNode(nodeID string) []uint16 {
 	ring.mu.RLock()
 	defer ring.mu.RUnlock()
-	
+
 	var slots []uint16
 	for slot, assignedNodeID := range ring.slotMap {
 		if assignedNodeID == nodeID {
 			slots = append(slots, uint16(slot))
 		}
 	}
-	
+
 	return slots
 }
 
 // redistributeSlots redistributes hash slots evenly among all alive nodes
 func (ring *HashRing) redistributeSlots() {
 	// This method should be called with ring.mu locked
-	
+
 	// Get all alive nodes
 	var aliveNodes []string
 	for nodeID, node := range ring.nodes {
@@ -479,7 +482,7 @@ func (ring *HashRing) redistributeSlots() {
 			aliveNodes = append(aliveNodes, nodeID)
 		}
 	}
-	
+
 	if len(aliveNodes) == 0 {
 		// No alive nodes, clear all slots
 		for i := range ring.slotMap {
@@ -487,11 +490,22 @@ func (ring *HashRing) redistributeSlots() {
 		}
 		return
 	}
-	
+
+	// Log rebalancing start
+	ctx := context.Background()
+	logging.Info(ctx, "cluster", "slot_rebalance", "Starting hash slot redistribution", map[string]interface{}{
+		"total_nodes":      len(ring.nodes),
+		"alive_nodes":      len(aliveNodes),
+		"total_slots":      RedisHashSlots,
+		"nodes":            aliveNodes,
+		"rebalance_reason": "node_topology_change",
+	})
+
 	// Distribute slots evenly among alive nodes
 	slotsPerNode := RedisHashSlots / len(aliveNodes)
 	remainder := RedisHashSlots % len(aliveNodes)
-	
+
+	slotAssignments := make(map[string]int)
 	slot := 0
 	for i, nodeID := range aliveNodes {
 		// Calculate number of slots for this node
@@ -499,13 +513,24 @@ func (ring *HashRing) redistributeSlots() {
 		if i < remainder {
 			nodeSlots++
 		}
-		
+
+		slotAssignments[nodeID] = nodeSlots
+
 		// Assign slots to this node
 		for j := 0; j < nodeSlots && slot < RedisHashSlots; j++ {
 			ring.slotMap[slot] = nodeID
 			slot++
 		}
 	}
+
+	// Log completion with slot distribution details
+	logging.Info(ctx, "cluster", "slot_rebalance", "Hash slot redistribution completed", map[string]interface{}{
+		"total_slots_assigned":    slot,
+		"slots_per_node":          slotsPerNode,
+		"remainder_slots":         remainder,
+		"slot_assignments":        slotAssignments,
+		"redistribution_complete": true,
+	})
 }
 
 // SetNodeStatus updates the status of a node

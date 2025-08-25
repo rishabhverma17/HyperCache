@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -422,13 +423,23 @@ func (dr *distributedRouting) GetNodeBySlot(slot uint16) (nodeID string, address
 	if nodeID == "" {
 		return "", "", 0
 	}
-	
+
 	// Get node details from hash ring
 	nodes := dr.coordinator.hashRing.GetNodes()
 	if node, exists := nodes[nodeID]; exists {
+		// Get the RESP port from membership metadata instead of using gossip port
+		if member, memberExists := dr.coordinator.membership.GetMember(nodeID); memberExists {
+			if respPortStr, hasRespPort := member.Metadata["resp_port"]; hasRespPort {
+				// Parse RESP port from metadata
+				if respPort, err := strconv.Atoi(respPortStr); err == nil {
+					return nodeID, node.Address, respPort
+				}
+			}
+		}
+		// Fallback to gossip port if RESP port not available (shouldn't happen in normal operation)
 		return nodeID, node.Address, node.Port
 	}
-	
+
 	return "", "", 0
 }
 
@@ -437,13 +448,23 @@ func (dr *distributedRouting) GetNodeByKey(key string) (nodeID string, address s
 	if nodeID == "" {
 		return "", "", 0
 	}
-	
+
 	// Get node details from hash ring
 	nodes := dr.coordinator.hashRing.GetNodes()
 	if node, exists := nodes[nodeID]; exists {
+		// Get the RESP port from membership metadata instead of using gossip port
+		if member, memberExists := dr.coordinator.membership.GetMember(nodeID); memberExists {
+			if respPortStr, hasRespPort := member.Metadata["resp_port"]; hasRespPort {
+				// Parse RESP port from metadata
+				if respPort, err := strconv.Atoi(respPortStr); err == nil {
+					return nodeID, node.Address, respPort
+				}
+			}
+		}
+		// Fallback to gossip port if RESP port not available (shouldn't happen in normal operation)
 		return nodeID, node.Address, node.Port
 	}
-	
+
 	return "", "", 0
 }
 

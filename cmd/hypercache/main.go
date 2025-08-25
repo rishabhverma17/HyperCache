@@ -191,6 +191,7 @@ func main() {
 			BindAddress:             cfg.Network.RESPBindAddr, // Bind to all interfaces for multi-VM
 			BindPort:                cfg.Network.GossipPort,
 			AdvertiseAddress:        cfg.Network.AdvertiseAddr, // VM-specific IP for multi-VM
+			RESPPort:                cfg.Network.RESPPort,      // Add RESP port for client routing
 			SeedNodes:               cfg.Cluster.Seeds,
 			JoinTimeout:             30, // 30 seconds
 			HeartbeatInterval:       5,  // 5 seconds

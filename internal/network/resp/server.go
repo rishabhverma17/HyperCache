@@ -128,6 +128,23 @@ func (s *Server) Start() error {
 	s.listener = listener
 	s.running.Store(true)
 
+	// Log server startup with cluster information
+	ctx := context.Background()
+	clusterInfo := map[string]interface{}{
+		"listen_address": s.address,
+		"cluster_mode":   s.coord != nil,
+	}
+
+	if s.coord != nil {
+		clusterInfo["local_node"] = s.coord.GetLocalNodeID()
+		if routing := s.coord.GetRouting(); routing != nil {
+			clusterInfo["redis_compatible"] = true
+			clusterInfo["hash_slots"] = 16384
+		}
+	}
+
+	logging.Info(ctx, logging.ComponentRESP, logging.ActionStart, "RESP server started with cluster routing", clusterInfo)
+
 	// Start connection cleanup goroutine
 	s.wg.Add(1)
 	go s.connectionCleaner()
@@ -358,19 +375,32 @@ func (s *Server) handleGet(cmd Command) ([]byte, error) {
 	}
 
 	key := cmd.Args[0]
-	
+
 	// Check if this key belongs to this node using Redis-compatible slot routing
 	if s.coord != nil && s.coord.GetRouting() != nil {
 		routing := s.coord.GetRouting()
 		localNodeID := s.coord.GetLocalNodeID()
-		
+
 		// Get the node that should handle this key
 		targetNodeID, address, port := routing.GetNodeByKey(key)
-		
+
 		// If the key belongs to a different node, return MOVED response
 		if targetNodeID != "" && targetNodeID != localNodeID {
 			formatter := NewFormatter()
 			slot := routing.GetHashSlot(key)
+
+			// Log MOVED response for observability
+			ctx := context.Background()
+			logging.Info(ctx, logging.ComponentRESP, "cluster_redirect", "MOVED response sent for GET command", map[string]interface{}{
+				"key":             key,
+				"command":         "GET",
+				"hash_slot":       slot,
+				"local_node":      localNodeID,
+				"target_node":     targetNodeID,
+				"target_address":  fmt.Sprintf("%s:%d", address, port),
+				"client_redirect": true,
+			})
+
 			return formatter.FormatMoved(slot, address, port), nil
 		}
 	}
@@ -379,6 +409,14 @@ func (s *Server) handleGet(cmd Command) ([]byte, error) {
 	value, err := s.store.Get(key)
 	if err == nil {
 		// Key found locally, return it
+		ctx := context.Background()
+		logging.Debug(ctx, logging.ComponentRESP, "local_operation", "GET executed locally", map[string]interface{}{
+			"key":        key,
+			"command":    "GET",
+			"found":      true,
+			"local_node": s.coord.GetLocalNodeID(),
+		})
+
 		var bytes []byte
 		switch v := value.(type) {
 		case []byte:
@@ -407,19 +445,33 @@ func (s *Server) handleSet(cmd Command) ([]byte, error) {
 
 	key := cmd.Args[0]
 	value := []byte(cmd.Args[1])
-	
+
 	// Check if this key belongs to this node using Redis-compatible slot routing
 	if s.coord != nil && s.coord.GetRouting() != nil {
 		routing := s.coord.GetRouting()
 		localNodeID := s.coord.GetLocalNodeID()
-		
+
 		// Get the node that should handle this key
 		targetNodeID, address, port := routing.GetNodeByKey(key)
-		
+
 		// If the key belongs to a different node, return MOVED response
 		if targetNodeID != "" && targetNodeID != localNodeID {
 			formatter := NewFormatter()
 			slot := routing.GetHashSlot(key)
+
+			// Log MOVED response for observability
+			ctx := context.Background()
+			logging.Info(ctx, logging.ComponentRESP, "cluster_redirect", "MOVED response sent for SET command", map[string]interface{}{
+				"key":             key,
+				"command":         "SET",
+				"hash_slot":       slot,
+				"local_node":      localNodeID,
+				"target_node":     targetNodeID,
+				"target_address":  fmt.Sprintf("%s:%d", address, port),
+				"client_redirect": true,
+				"value_size":      len(value),
+			})
+
 			return formatter.FormatMoved(slot, address, port), nil
 		}
 	}
@@ -464,6 +516,16 @@ func (s *Server) handleSet(cmd Command) ([]byte, error) {
 		return nil, fmt.Errorf("failed to set key locally: %w", err)
 	}
 
+	// Log successful local SET operation
+	ctx := context.Background()
+	logging.Debug(ctx, logging.ComponentRESP, "local_operation", "SET executed locally", map[string]interface{}{
+		"key":        key,
+		"command":    "SET",
+		"value_size": len(value),
+		"ttl":        ttl.Seconds(),
+		"local_node": s.coord.GetLocalNodeID(),
+	})
+
 	// If we have a coordinator, broadcast SET event to replicas
 	if s.coord != nil && s.coord.GetEventBus() != nil {
 		eventBus := s.coord.GetEventBus()
@@ -502,18 +564,32 @@ func (s *Server) handleDel(cmd Command) ([]byte, error) {
 		if s.coord != nil && s.coord.GetRouting() != nil {
 			routing := s.coord.GetRouting()
 			localNodeID := s.coord.GetLocalNodeID()
-			
+
 			// Get the node that should handle this key
 			targetNodeID, address, port := routing.GetNodeByKey(key)
-			
+
 			// If the key belongs to a different node, return MOVED response
 			if targetNodeID != "" && targetNodeID != localNodeID {
 				formatter := NewFormatter()
 				slot := routing.GetHashSlot(key)
+
+				// Log MOVED response for observability
+				ctx := context.Background()
+				logging.Info(ctx, logging.ComponentRESP, "cluster_redirect", "MOVED response sent for DEL command", map[string]interface{}{
+					"key":             key,
+					"command":         "DEL",
+					"hash_slot":       slot,
+					"local_node":      localNodeID,
+					"target_node":     targetNodeID,
+					"target_address":  fmt.Sprintf("%s:%d", address, port),
+					"client_redirect": true,
+					"keys_remaining":  len(cmd.Args) - 1,
+				})
+
 				return formatter.FormatMoved(slot, address, port), nil
 			}
 		}
-		
+
 		err := s.store.Delete(key)
 		if err == nil {
 			deleted++

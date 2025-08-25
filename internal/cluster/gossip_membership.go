@@ -58,6 +58,7 @@ func NewGossipMembership(config ClusterConfig) (*GossipMembership, error) {
 			"cluster":      config.ClusterName,
 			"version":      "1.0.0",
 			"capabilities": "filters,persistence,resp",
+			"resp_port":    fmt.Sprintf("%d", config.RESPPort), // Add RESP port for client routing
 		},
 		JoinedAt: time.Now(),
 		LastSeen: time.Now(),
