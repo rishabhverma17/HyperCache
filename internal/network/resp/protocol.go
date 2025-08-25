@@ -262,6 +262,16 @@ func (f *Formatter) FormatError(err string) []byte {
 	return []byte(fmt.Sprintf("-%s\r\n", err))
 }
 
+// FormatMoved formats a MOVED response for Redis cluster redirection
+func (f *Formatter) FormatMoved(slot uint16, host string, port int) []byte {
+	return []byte(fmt.Sprintf("-MOVED %d %s:%d\r\n", slot, host, port))
+}
+
+// FormatAsk formats an ASK response for Redis cluster redirection
+func (f *Formatter) FormatAsk(slot uint16, host string, port int) []byte {
+	return []byte(fmt.Sprintf("-ASK %d %s:%d\r\n", slot, host, port))
+}
+
 // FormatInteger formats an integer response
 func (f *Formatter) FormatInteger(i int64) []byte {
 	return []byte(fmt.Sprintf(":%d\r\n", i))

@@ -375,6 +375,45 @@ func (r *simpleRouting) GetMetrics() HashRingMetrics {
 	return r.coordinator.hashRing.GetMetrics()
 }
 
+// Redis-compatible slot-based routing methods
+func (r *simpleRouting) GetHashSlot(key string) uint16 {
+	return GetHashSlot(key)
+}
+
+func (r *simpleRouting) GetNodeBySlot(slot uint16) (nodeID string, address string, port int) {
+	nodeID = r.coordinator.hashRing.GetNodeBySlot(slot)
+	if nodeID == "" {
+		return "", "", 0
+	}
+	
+	// Get node details from hash ring
+	nodes := r.coordinator.hashRing.GetNodes()
+	if node, exists := nodes[nodeID]; exists {
+		return nodeID, node.Address, node.Port
+	}
+	
+	return "", "", 0
+}
+
+func (r *simpleRouting) GetNodeByKey(key string) (nodeID string, address string, port int) {
+	nodeID = r.coordinator.hashRing.GetNodeByKey(key)
+	if nodeID == "" {
+		return "", "", 0
+	}
+	
+	// Get node details from hash ring
+	nodes := r.coordinator.hashRing.GetNodes()
+	if node, exists := nodes[nodeID]; exists {
+		return nodeID, node.Address, node.Port
+	}
+	
+	return "", "", 0
+}
+
+func (r *simpleRouting) GetSlotsByNode(nodeID string) []uint16 {
+	return r.coordinator.hashRing.GetSlotsByNode(nodeID)
+}
+
 // simpleEventBus implements EventBus for the simple coordinator
 type simpleEventBus struct {
 	coordinator *SimpleCoordinator

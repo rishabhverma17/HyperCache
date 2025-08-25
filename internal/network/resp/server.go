@@ -358,6 +358,22 @@ func (s *Server) handleGet(cmd Command) ([]byte, error) {
 	}
 
 	key := cmd.Args[0]
+	
+	// Check if this key belongs to this node using Redis-compatible slot routing
+	if s.coord != nil && s.coord.GetRouting() != nil {
+		routing := s.coord.GetRouting()
+		localNodeID := s.coord.GetLocalNodeID()
+		
+		// Get the node that should handle this key
+		targetNodeID, address, port := routing.GetNodeByKey(key)
+		
+		// If the key belongs to a different node, return MOVED response
+		if targetNodeID != "" && targetNodeID != localNodeID {
+			formatter := NewFormatter()
+			slot := routing.GetHashSlot(key)
+			return formatter.FormatMoved(slot, address, port), nil
+		}
+	}
 
 	// DISTRIBUTED GET: Check local store first
 	value, err := s.store.Get(key)
@@ -379,25 +395,7 @@ func (s *Server) handleGet(cmd Command) ([]byte, error) {
 		return formatter.FormatBulkBytes(bytes), nil
 	}
 
-	// Key not found locally - if we have a coordinator, check if we should have this key
-	if s.coord != nil && s.coord.GetRouting() != nil {
-		routing := s.coord.GetRouting()
-
-		// Check if this node should be a replica for this key
-		if routing.IsReplica(key) || routing.IsLocal(key) {
-			// We should have this key but don't - it might not be replicated yet
-			// Return null for now (in production, could wait or check other replicas)
-			formatter := NewFormatter()
-			return formatter.FormatNull(), nil
-		}
-
-		// This key belongs to other nodes - we should return null
-		// In a full implementation, we could forward the request to the appropriate node
-		formatter := NewFormatter()
-		return formatter.FormatNull(), nil
-	}
-
-	// No coordinator or key not found
+	// Key not found locally but should be here - return null
 	formatter := NewFormatter()
 	return formatter.FormatNull(), nil
 }
@@ -409,6 +407,22 @@ func (s *Server) handleSet(cmd Command) ([]byte, error) {
 
 	key := cmd.Args[0]
 	value := []byte(cmd.Args[1])
+	
+	// Check if this key belongs to this node using Redis-compatible slot routing
+	if s.coord != nil && s.coord.GetRouting() != nil {
+		routing := s.coord.GetRouting()
+		localNodeID := s.coord.GetLocalNodeID()
+		
+		// Get the node that should handle this key
+		targetNodeID, address, port := routing.GetNodeByKey(key)
+		
+		// If the key belongs to a different node, return MOVED response
+		if targetNodeID != "" && targetNodeID != localNodeID {
+			formatter := NewFormatter()
+			slot := routing.GetHashSlot(key)
+			return formatter.FormatMoved(slot, address, port), nil
+		}
+	}
 
 	// Parse optional arguments (EX, PX, NX, XX, etc.)
 	var ttl time.Duration
@@ -484,6 +498,22 @@ func (s *Server) handleDel(cmd Command) ([]byte, error) {
 	deleted := int64(0)
 
 	for _, key := range cmd.Args {
+		// Check if this key belongs to this node using Redis-compatible slot routing
+		if s.coord != nil && s.coord.GetRouting() != nil {
+			routing := s.coord.GetRouting()
+			localNodeID := s.coord.GetLocalNodeID()
+			
+			// Get the node that should handle this key
+			targetNodeID, address, port := routing.GetNodeByKey(key)
+			
+			// If the key belongs to a different node, return MOVED response
+			if targetNodeID != "" && targetNodeID != localNodeID {
+				formatter := NewFormatter()
+				slot := routing.GetHashSlot(key)
+				return formatter.FormatMoved(slot, address, port), nil
+			}
+		}
+		
 		err := s.store.Delete(key)
 		if err == nil {
 			deleted++

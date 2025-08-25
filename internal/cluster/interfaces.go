@@ -174,6 +174,12 @@ type RoutingProvider interface {
 
 	// Get routing metrics
 	GetMetrics() HashRingMetrics
+	
+	// Redis-compatible slot-based routing
+	GetHashSlot(key string) uint16
+	GetNodeBySlot(slot uint16) (nodeID string, address string, port int)
+	GetNodeByKey(key string) (nodeID string, address string, port int)
+	GetSlotsByNode(nodeID string) []uint16
 }
 
 // EventBus defines the interface for cluster-wide event distribution

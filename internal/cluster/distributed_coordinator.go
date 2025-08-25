@@ -412,6 +412,45 @@ func (dr *distributedRouting) GetMetrics() HashRingMetrics {
 	return dr.coordinator.hashRing.GetMetrics()
 }
 
+// Redis-compatible slot-based routing methods
+func (dr *distributedRouting) GetHashSlot(key string) uint16 {
+	return GetHashSlot(key)
+}
+
+func (dr *distributedRouting) GetNodeBySlot(slot uint16) (nodeID string, address string, port int) {
+	nodeID = dr.coordinator.hashRing.GetNodeBySlot(slot)
+	if nodeID == "" {
+		return "", "", 0
+	}
+	
+	// Get node details from hash ring
+	nodes := dr.coordinator.hashRing.GetNodes()
+	if node, exists := nodes[nodeID]; exists {
+		return nodeID, node.Address, node.Port
+	}
+	
+	return "", "", 0
+}
+
+func (dr *distributedRouting) GetNodeByKey(key string) (nodeID string, address string, port int) {
+	nodeID = dr.coordinator.hashRing.GetNodeByKey(key)
+	if nodeID == "" {
+		return "", "", 0
+	}
+	
+	// Get node details from hash ring
+	nodes := dr.coordinator.hashRing.GetNodes()
+	if node, exists := nodes[nodeID]; exists {
+		return nodeID, node.Address, node.Port
+	}
+	
+	return "", "", 0
+}
+
+func (dr *distributedRouting) GetSlotsByNode(nodeID string) []uint16 {
+	return dr.coordinator.hashRing.GetSlotsByNode(nodeID)
+}
+
 // Factory function for distributed coordinator
 func NewDistributedCoordinatorFactory() CoordinatorFactory {
 	return func(config ClusterConfig) (CoordinatorService, error) {
