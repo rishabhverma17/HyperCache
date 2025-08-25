@@ -5,6 +5,10 @@ on:
     - cron: '0 0 * * 1'  # Weekly on Monday
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   update-dependencies:
     name: Update Go Dependencies
@@ -21,33 +25,63 @@ jobs:
       with:
         go-version: '1.23.2'
 
-    - name: Update dependencies
+    - name: Check for changes
+      id: changes
       run: |
+        echo "🔄 Updating Go dependencies..."
+        
+        # Get current versions for comparison
+        echo "Current go.mod before update:"
+        cat go.mod
+        
+        # Update dependencies
         go get -u ./...
         go mod tidy
+        
+        echo "Updated go.mod after update:"
+        cat go.mod
+        
+        # Check if there are any changes
+        if git diff --quiet go.mod go.sum; then
+          echo "No dependency updates available"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "Dependencies updated successfully"
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          git diff --name-only
+        fi
 
     - name: Run tests
-      run: go test ./tests/... ./internal/... ./pkg/...
+      if: steps.changes.outputs.has_changes == 'true'
+      run: |
+        echo "🧪 Running tests after dependency update..."
+        go test ./tests/... ./internal/... ./pkg/...
 
     - name: Create Pull Request
+      if: steps.changes.outputs.has_changes == 'true'
       uses: peter-evans/create-pull-request@v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         commit-message: 'chore: update Go dependencies'
         title: 'chore: update Go dependencies'
         body: |
-          ## Automated Dependency Update
+          ## 🔄 Automated Dependency Update
           
           This PR updates Go dependencies to their latest versions.
           
-          ### Changes
+          ### 📋 Changes
           - Updated Go modules to latest versions
-          - Ran `go mod tidy` to clean up
+          - Ran `go mod tidy` to clean up dependencies
+          - All tests pass after updates
           
-          ### Testing
+          ### ✅ Testing
           - [x] All tests pass
           - [x] Build succeeds
+          - [x] Dependencies resolved correctly
           
+          ### 🤖 Automation
           This PR was created automatically by the dependency update workflow.
+          
+          **Review the changes and merge if everything looks good!**
         branch: chore/update-dependencies
         delete-branch: true
