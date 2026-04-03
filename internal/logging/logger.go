@@ -58,9 +58,9 @@ type LogEntry struct {
 	Duration      *int64                 `json:"duration_ms,omitempty"`
 	Error         string                 `json:"error,omitempty"`
 	Fields        map[string]interface{} `json:"fields,omitempty"`
-	File          string                 `json:"file,omitempty"`
-	Line          int                    `json:"line,omitempty"`
-	Function      string                 `json:"function,omitempty"`
+	File          string                 `json:"caller_file,omitempty"`
+	Line          int                    `json:"caller_line,omitempty"`
+	Function      string                 `json:"caller_func,omitempty"`
 }
 
 // Logger represents the structured logger
