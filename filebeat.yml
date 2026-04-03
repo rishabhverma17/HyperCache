@@ -9,7 +9,7 @@ filebeat.inputs:
 
 output.elasticsearch:
   hosts: ["elasticsearch:9200"]
-  index: "logs-%{+yyyy.MM.dd}"
+  index: "hypercache-logs-%{+yyyy.MM.dd}"
   data_stream.enabled: false
   
 setup.template.enabled: false

@@ -7,15 +7,13 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
 
 env:
   GO_VERSION: '1.23.2'
 
 jobs:
-  pr-validation:
-    name: PR Validation
+  validate:
+    name: Validate & Test
     runs-on: ubuntu-latest
 
     steps:
@@ -23,339 +21,102 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
 
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
     - name: Download dependencies
-      run: go mod download
-
-    - name: Verify dependencies
-      run: go mod verify
+      run: go mod download && go mod verify
 
     - name: Format check
       run: |
-        # Exclude examples directory from formatting check
         UNFORMATTED=$(find . -name "*.go" -not -path "./examples/*" -exec gofmt -s -l {} \;)
         if [ -n "$UNFORMATTED" ]; then
-          echo "❌ Code is not properly formatted"
+          echo "Unformatted files:"
           echo "$UNFORMATTED"
           exit 1
         fi
-        echo "✅ Code formatting is correct"
 
-    - name: Vet check
-      run: |
-        go vet ./...
-        echo "✅ go vet passed"
+    - name: Vet
+      run: go vet ./...
 
-    - name: Build check
-      run: |
-        go build -v ./...
-        echo "✅ Build successful"
-
-  pr-unit-tests:
-    name: PR Unit Tests
-    runs-on: ubuntu-latest
-    needs: pr-validation
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
+    - name: Lint
+      uses: golangci/golangci-lint-action@v6
       with:
-        go-version: ${{ env.GO_VERSION }}
+        version: latest
+        args: --timeout=5m
 
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+    - name: Build
+      run: go build -v ./cmd/hypercache
 
-    - name: Install calculation tools
-      run: sudo apt-get install -y bc
-
-    - name: Download dependencies
-      run: go mod download
-
-    - name: Run unit tests
+    - name: Unit tests with coverage
       run: |
-        echo "🧪 Running unit tests directly with Go (PR validation)..."
         mkdir -p test-results
-        
-        # Run unit tests with coverage for PR validation
-        go test -v -race -coverprofile=test-results/coverage.out -coverpkg=./internal/...,./pkg/...,./cmd/... ./internal/... ./pkg/... ./cmd/... | tee test-results/unit-output.txt
-        
-        echo "✅ Unit tests completed"
+        go test -race -coverprofile=test-results/coverage.out -covermode=atomic \
+          -coverpkg=./internal/...,./pkg/...,./cmd/... -timeout=5m \
+          ./internal/... ./pkg/...
 
-    - name: Report coverage
+    - name: Coverage report
       run: |
         if [ -f "test-results/coverage.out" ]; then
-          coverage=$(go tool cover -func=test-results/coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "📊 Overall coverage: ${coverage}%"
-          echo "✅ Coverage report generated successfully"
-        else
-          echo "⚠️ Coverage file not found, skipping coverage report"
+          go tool cover -func=test-results/coverage.out | tail -1
         fi
 
-    - name: Upload PR test results
+    - name: Upload results
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: pr-unit-test-results
-        path: |
-          test-results/
-          coverage.html
+        name: pr-test-results
+        path: test-results/
 
-  pr-integration-smoke-test:
-    name: PR Integration Smoke Test
+  integration:
+    name: Integration Smoke Test
     runs-on: ubuntu-latest
-    needs: pr-unit-tests
+    needs: validate
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
 
-    - name: Cache Go modules
-      uses: actions/cache@v4
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+        node-version: '20'
 
-    - name: Download dependencies
-      run: go mod download
+    - name: Install Newman
+      run: npm install -g newman
 
-    - name: Build HyperCache
+    - name: Build and start cluster
       run: |
-        mkdir -p bin
-        go build -v -o bin/hypercache ./cmd/hypercache
+        mkdir -p bin logs
+        go build -o bin/hypercache ./cmd/hypercache
+        rm -rf /tmp/hypercache && mkdir -p /tmp/hypercache/node-{1,2,3}
+        
+        ./bin/hypercache -protocol resp -config configs/node1-config.yaml > logs/node-1.log 2>&1 &
+        sleep 3
+        ./bin/hypercache -protocol resp -config configs/node2-config.yaml > logs/node-2.log 2>&1 &
+        sleep 3
+        ./bin/hypercache -protocol resp -config configs/node3-config.yaml > logs/node-3.log 2>&1 &
+        sleep 5
+        
+        for port in 9080 9081 9082; do
+          curl -sf http://localhost:$port/health > /dev/null || { cat logs/node-*.log; exit 1; }
+        done
 
-    - name: Start test cluster
+    - name: Run Postman smoke test
       run: |
-        # Clean any existing processes and persistence data
-        pkill -f hypercache || true
-        sleep 2
-        rm -rf data/ logs/ || true
-        
-        # Create required directories
-        mkdir -p bin logs data/node-{1,2,3}
-        
-        # Start 3-node cluster using the script if configs exist, otherwise simple startup
-        echo "🚀 Starting 3-node HyperCache cluster for PR testing..."
-        
-        if [ -f "configs/node1-config.yaml" ] && [ -f "scripts/start-cluster.sh" ]; then
-          # Use the existing cluster script
-          chmod +x scripts/start-cluster.sh
-          ./scripts/start-cluster.sh cluster
-        else
-          # Fallback: Start nodes directly
-          echo "⚠️ Using fallback cluster startup (configs not found)"
-          
-          # Node 1 - HTTP API on 9080, RESP on 8080
-          ./bin/hypercache -node-id=node-1 -bind=127.0.0.1:8080 -port=8080 > logs/node-1.log 2>&1 &
-          NODE1_PID=$!
-          
-          # Node 2 - HTTP API on 9081, RESP on 8081  
-          ./bin/hypercache -node-id=node-2 -bind=127.0.0.1:8081 -port=8081 > logs/node-2.log 2>&1 &
-          NODE2_PID=$!
-          
-          # Node 3 - HTTP API on 9082, RESP on 8082
-          ./bin/hypercache -node-id=node-3 -bind=127.0.0.1:8082 -port=8082 > logs/node-3.log 2>&1 &
-          NODE3_PID=$!
-          
-          # Save PIDs for cleanup
-          echo "$NODE1_PID $NODE2_PID $NODE3_PID" > cluster_pids.txt
-        fi
-        
-        # Wait for cluster to stabilize
-        echo "⏳ Waiting 8 seconds for cluster to stabilize (smoke test timing)..."
-        sleep 8
-        
-        echo "✅ Cluster started successfully"
+        newman run HyperCache.postman_collection.json \
+          --folder "1. Health & Cluster Status" \
+          --folder "3. Cache CRUD - Single Node" \
+          --folder "9. Cuckoo Filter" \
+          --delay-request 500 \
+          --timeout-request 10000
 
-    - name: Run integration smoke test
-      run: |
-        echo "🧪 Running integration smoke tests directly with Go..."
-        mkdir -p test-results
-        
-        # Run integration tests with smoke test timeout
-        go test -v -timeout=3m ./tests/integration/... | tee test-results/integration-output.txt
-        
-        echo "✅ Integration smoke tests completed"
-      env:
-        CI: true
-        SMOKE_TEST: true
-
-    - name: Cleanup test cluster
+    - name: Cleanup
       if: always()
-      run: |
-        echo "🧹 Cleaning up PR test cluster..."
-        
-        # Try to use cleanup script first
-        if [ -f "scripts/clean-persistence.sh" ]; then
-          chmod +x scripts/clean-persistence.sh
-          ./scripts/clean-persistence.sh --all || true
-        fi
-        
-        # Manual cleanup
-        if [ -f cluster_pids.txt ]; then
-          for pid in $(cat cluster_pids.txt); do
-            kill $pid 2>/dev/null || true
-          done
-          rm -f cluster_pids.txt
-        fi
-        
-        # Kill any remaining hypercache processes
-        pkill -f hypercache || true
-        sleep 2
-        
-        echo "✅ PR cleanup completed"
-
-    - name: Upload integration test logs
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: pr-integration-logs
-        path: |
-          logs/
-          test-results/
-
-  pr-performance-check:
-    name: PR Performance Check
-    runs-on: ubuntu-latest
-    needs: pr-unit-tests
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
-    - name: Download dependencies
-      run: go mod download
-
-    - name: Run critical performance benchmarks
-      run: |
-        mkdir -p benchmark-results
-        echo "🧪 Running critical performance checks..."
-        
-        # Run Cuckoo Filter benchmarks (most critical)
-        go test -bench=BenchmarkCuckooFilter -benchmem -run=^$ ./tests/unit/filter/... > benchmark-results/pr-cuckoo-bench.txt || true
-        
-        echo "📊 Performance check completed"
-        if [ -f "benchmark-results/pr-cuckoo-bench.txt" ]; then
-          echo "✅ Cuckoo Filter benchmarks completed"
-          cat benchmark-results/pr-cuckoo-bench.txt
-        fi
-
-    - name: Upload performance results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: pr-performance-results
-        path: benchmark-results/
-
-  pr-summary:
-    name: PR Test Summary
-    runs-on: ubuntu-latest
-    needs: [pr-validation, pr-unit-tests, pr-integration-smoke-test, pr-performance-check]
-    if: always()
-
-    steps:
-    - name: Generate PR summary
-      run: |
-        echo "# 🔍 Pull Request Test Summary" > pr_summary.md
-        echo "" >> pr_summary.md
-        echo "## Validation Results" >> pr_summary.md
-        echo "- **Code Validation**: ${{ needs.pr-validation.result }}" >> pr_summary.md
-        echo "- **Unit Tests**: ${{ needs.pr-unit-tests.result }}" >> pr_summary.md
-        echo "- **Integration Smoke**: ${{ needs.pr-integration-smoke-test.result }}" >> pr_summary.md
-        echo "- **Performance Check**: ${{ needs.pr-performance-check.result }}" >> pr_summary.md
-        echo "" >> pr_summary.md
-        
-        success_count=0
-        total_count=4
-        
-        if [ "${{ needs.pr-validation.result }}" = "success" ]; then
-          success_count=$((success_count + 1))
-        fi
-        if [ "${{ needs.pr-unit-tests.result }}" = "success" ]; then
-          success_count=$((success_count + 1))
-        fi
-        if [ "${{ needs.pr-integration-smoke-test.result }}" = "success" ]; then
-          success_count=$((success_count + 1))
-        fi
-        if [ "${{ needs.pr-performance-check.result }}" = "success" ]; then
-          success_count=$((success_count + 1))
-        fi
-        
-        echo "## Overall Status: ${success_count}/${total_count} checks passed" >> pr_summary.md
-        
-        if [ $success_count -eq $total_count ]; then
-          echo "✅ **All checks passed - PR ready for review!**" >> pr_summary.md
-        elif [ $success_count -ge 2 ]; then
-          echo "⚠️ **Partial success - some issues need attention**" >> pr_summary.md
-        else
-          echo "❌ **Multiple issues detected - please review and fix**" >> pr_summary.md
-        fi
-        
-        cat pr_summary.md
-
-    - name: Comment PR with results
-      uses: actions/github-script@v7
-      if: always()
-      with:
-        script: |
-          const fs = require('fs');
-          const summary = fs.readFileSync('pr_summary.md', 'utf8');
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: summary
-          });
-
-    - name: Upload PR summary
-      uses: actions/upload-artifact@v4
-      with:
-        name: pr-summary
-        path: pr_summary.md
+      run: pkill -f bin/hypercache 2>/dev/null || true

@@ -50,20 +50,20 @@ processors:
 
 output.elasticsearch:
   hosts: ["hypercache-elasticsearch:9200"]
-  index: "hypercache-docker-logs-%{+yyyy.MM.dd}"
+  index: "hypercache-logs-%{+yyyy.MM.dd}"
   template.enabled: true
-  template.pattern: "hypercache-docker-*"
+  template.pattern: "hypercache-logs-*"
 
 setup.template.enabled: true
-setup.template.name: "hypercache-docker"
-setup.template.pattern: "hypercache-docker-*"
+setup.template.name: "hypercache-logs"
+setup.template.pattern: "hypercache-logs-*"
 setup.template.settings:
   index.number_of_shards: 1
   index.number_of_replicas: 0
 
 # Index lifecycle management
 setup.ilm.enabled: true
-setup.ilm.rollover_alias: "hypercache-docker-logs"
+setup.ilm.rollover_alias: "hypercache-logs"
 setup.ilm.pattern: "{now/d}-000001"
 setup.ilm.policy: |
   {

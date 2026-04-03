@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # Nginx load balancer
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "6379:6379"  # Redis protocol
+      - "8080:8080"  # HTTP management
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - hypercache-1
+      - hypercache-2  
+      - hypercache-3
+    restart: unless-stopped
+
+  # HyperCache nodes - Docker handles service discovery
+  hypercache-1:
+    build: .
+    environment:
+      - NODE_ID=node-1
+      - RESP_PORT=8080
+      - HTTP_PORT=9080
+      - GOSSIP_PORT=7080
+      - CLUSTER_SEEDS=hypercache-1:7080,hypercache-2:7080,hypercache-3:7080
+    expose:
+      - "8080"
+      - "9080"
+      - "7080"
+    volumes:
+      - ./data/node-1:/data
+    restart: unless-stopped
+
+  hypercache-2:
+    build: .
+    environment:
+      - NODE_ID=node-2
+      - RESP_PORT=8080
+      - HTTP_PORT=9080
+      - GOSSIP_PORT=7080
+      - CLUSTER_SEEDS=hypercache-1:7080,hypercache-2:7080,hypercache-3:7080
+    expose:
+      - "8080"
+      - "9080" 
+      - "7080"
+    volumes:
+      - ./data/node-2:/data
+    restart: unless-stopped
+
+  hypercache-3:
+    build: .
+    environment:
+      - NODE_ID=node-3
+      - RESP_PORT=8080
+      - HTTP_PORT=9080
+      - GOSSIP_PORT=7080
+      - CLUSTER_SEEDS=hypercache-1:7080,hypercache-2:7080,hypercache-3:7080
+    expose:
+      - "8080"
+      - "9080"
+      - "7080"
+    volumes:
+      - ./data/node-3:/data
+    restart: unless-stopped
+
+  # Optional: Redis CLI for testing
+  redis-cli:
+    image: redis:alpine
+    command: ["redis-cli", "-h", "nginx", "-p", "6379"]
+    depends_on:
+      - nginx
+    profiles: ["tools"]

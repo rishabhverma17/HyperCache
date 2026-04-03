@@ -17,7 +17,7 @@ services:
 
   # HyperCache Node 1 (Bootstrap node)
   hypercache-node1:
-    image: hypercache/hypercache:latest
+    image: rishabhverma17/hypercache:latest
     container_name: hypercache-node1
     hostname: hypercache-node1
     user: "1000:1000"
@@ -54,7 +54,7 @@ services:
 
   # HyperCache Node 2
   hypercache-node2:
-    image: hypercache/hypercache:latest
+    image: rishabhverma17/hypercache:latest
     container_name: hypercache-node2
     hostname: hypercache-node2
     user: "1000:1000"
@@ -93,7 +93,7 @@ services:
 
   # HyperCache Node 3
   hypercache-node3:
-    image: hypercache/hypercache:latest
+    image: rishabhverma17/hypercache:latest
     container_name: hypercache-node3
     hostname: hypercache-node3
     user: "1000:1000"

@@ -45,8 +45,11 @@ func main() {
 	if *nodeID != "" {
 		cfg.Node.ID = *nodeID
 
-		// Use node-specific data directory
-		cfg.Node.DataDir = fmt.Sprintf("%s/%s", cfg.Node.DataDir, *nodeID)
+		// Use node-specific data directory, but avoid double-nesting
+		// (e.g., if config already has /tmp/hypercache/node-1 and nodeID is "node-1")
+		if !strings.HasSuffix(cfg.Node.DataDir, "/"+*nodeID) {
+			cfg.Node.DataDir = fmt.Sprintf("%s/%s", cfg.Node.DataDir, *nodeID)
+		}
 	}
 
 	// Initialize structured logging system
@@ -364,6 +367,102 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 	// Cache operations with middleware
 	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID))))
 
+	// Cuckoo filter endpoints
+	mux.HandleFunc("/api/filter/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		stats := store.FilterStats()
+		if stats == nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "filter not enabled", "node": nodeID})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"node":  nodeID,
+			"stats": stats,
+		})
+	})
+
+	mux.HandleFunc("/api/filter/check/", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/api/filter/check/")
+		if key == "" {
+			http.Error(w, "Key is required", http.StatusBadRequest)
+			return
+		}
+		stats := store.FilterStats()
+		if stats == nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "filter not enabled", "node": nodeID})
+			return
+		}
+		// Check the filter — this is a probabilistic check (might return false positive)
+		mightExist := store.FilterContains(key)
+		// Also check if key actually exists in the store
+		_, actualErr := store.Get(key)
+		actuallyExists := actualErr == nil
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"key":             key,
+			"filter_says":     mightExist,
+			"actually_exists": actuallyExists,
+			"false_positive":  mightExist && !actuallyExists,
+			"node":            nodeID,
+		})
+	})
+
+	// Prometheus-compatible metrics endpoint
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		stats := store.Stats()
+		health := coordinator.GetHealth()
+
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+		// Cache metrics
+		fmt.Fprintf(w, "# HELP hypercache_items_total Total number of items in the cache\n")
+		fmt.Fprintf(w, "# TYPE hypercache_items_total gauge\n")
+		fmt.Fprintf(w, "hypercache_items_total{node=\"%s\"} %d\n", nodeID, stats.TotalItems)
+
+		fmt.Fprintf(w, "# HELP hypercache_memory_bytes Current memory usage in bytes\n")
+		fmt.Fprintf(w, "# TYPE hypercache_memory_bytes gauge\n")
+		fmt.Fprintf(w, "hypercache_memory_bytes{node=\"%s\"} %d\n", nodeID, stats.TotalMemory)
+
+		fmt.Fprintf(w, "# HELP hypercache_hits_total Total cache hits\n")
+		fmt.Fprintf(w, "# TYPE hypercache_hits_total counter\n")
+		fmt.Fprintf(w, "hypercache_hits_total{node=\"%s\"} %d\n", nodeID, stats.HitCount)
+
+		fmt.Fprintf(w, "# HELP hypercache_misses_total Total cache misses\n")
+		fmt.Fprintf(w, "# TYPE hypercache_misses_total counter\n")
+		fmt.Fprintf(w, "hypercache_misses_total{node=\"%s\"} %d\n", nodeID, stats.MissCount)
+
+		fmt.Fprintf(w, "# HELP hypercache_evictions_total Total evictions\n")
+		fmt.Fprintf(w, "# TYPE hypercache_evictions_total counter\n")
+		fmt.Fprintf(w, "hypercache_evictions_total{node=\"%s\"} %d\n", nodeID, stats.EvictionCount)
+
+		fmt.Fprintf(w, "# HELP hypercache_errors_total Total errors\n")
+		fmt.Fprintf(w, "# TYPE hypercache_errors_total counter\n")
+		fmt.Fprintf(w, "hypercache_errors_total{node=\"%s\"} %d\n", nodeID, stats.ErrorCount)
+
+		fmt.Fprintf(w, "# HELP hypercache_hit_rate Cache hit rate percentage\n")
+		fmt.Fprintf(w, "# TYPE hypercache_hit_rate gauge\n")
+		fmt.Fprintf(w, "hypercache_hit_rate{node=\"%s\"} %.2f\n", nodeID, stats.HitRate())
+
+		// Cluster metrics
+		fmt.Fprintf(w, "# HELP hypercache_cluster_healthy Whether the cluster is healthy (1=yes, 0=no)\n")
+		fmt.Fprintf(w, "# TYPE hypercache_cluster_healthy gauge\n")
+		healthVal := 0
+		if health.Healthy {
+			healthVal = 1
+		}
+		fmt.Fprintf(w, "hypercache_cluster_healthy{node=\"%s\"} %d\n", nodeID, healthVal)
+
+		fmt.Fprintf(w, "# HELP hypercache_cluster_size Number of nodes in the cluster\n")
+		fmt.Fprintf(w, "# TYPE hypercache_cluster_size gauge\n")
+		fmt.Fprintf(w, "hypercache_cluster_size{node=\"%s\"} %d\n", nodeID, health.ClusterSize)
+
+		fmt.Fprintf(w, "# HELP hypercache_up Whether the node is up (always 1 if reachable)\n")
+		fmt.Fprintf(w, "# TYPE hypercache_up gauge\n")
+		fmt.Fprintf(w, "hypercache_up{node=\"%s\"} 1\n", nodeID)
+	})
+
 	// Wrap the main handler with CORS and logging middleware
 	handler := logging.CorrelationIDMiddleware(mux)
 
@@ -456,6 +555,11 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				"key":   key,
 				"found": true,
 			})
+
+			// Ensure []byte values are converted to string to avoid JSON base64 encoding
+			if b, ok := value.([]byte); ok {
+				value = string(b)
+			}
 
 			response := map[string]interface{}{
 				"success": true,
@@ -581,20 +685,19 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 			err := store.Delete(key)
 			timer()
 
+			existed := err == nil
 			if err != nil {
-				logging.Error(r.Context(), logging.ComponentCache, "delete_request", "Failed to delete key from cache", err, map[string]interface{}{
+				logging.Info(r.Context(), logging.ComponentCache, "delete_request", "Key not found for deletion", map[string]interface{}{
 					"key": key,
 				})
-				http.Error(w, fmt.Sprintf("Failed to delete key: %v", err), http.StatusInternalServerError)
-				return
+			} else {
+				logging.Info(r.Context(), logging.ComponentCache, "delete_request", "Cache DELETE operation successful", map[string]interface{}{
+					"key": key,
+				})
 			}
 
-			logging.Info(r.Context(), logging.ComponentCache, "delete_request", "Cache DELETE operation successful", map[string]interface{}{
-				"key": key,
-			})
-
 			// Publish DELETE event to event bus for replication to other nodes
-			if coordinator != nil && coordinator.GetEventBus() != nil {
+			if existed && coordinator != nil && coordinator.GetEventBus() != nil {
 				eventBus := coordinator.GetEventBus()
 
 				// Create DELETE event with correlation ID
@@ -638,16 +741,15 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 			response := map[string]interface{}{
 				"success":        true,
 				"message":        "Key deleted",
-				"existed":        true,
+				"existed":        existed,
 				"key":            key,
 				"node":           nodeID,
-				"replicated":     true,
+				"replicated":     existed,
 				"correlation_id": logging.GetCorrelationID(r.Context()),
 			}
 
-			if err != nil {
-				response["message"] = "Key not found or delete failed"
-				response["existed"] = false
+			if !existed {
+				response["message"] = "Key not found"
 			}
 
 			w.Header().Set("Content-Type", "application/json")

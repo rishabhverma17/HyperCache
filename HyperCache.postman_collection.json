@@ -1,0 +1,1564 @@
+{
+	"info": {
+		"_postman_id": "hypercache-collection-2026",
+		"name": "HyperCache - Distributed Cache Testing",
+		"description": "Complete test suite for HyperCache 3-node cluster.\n\nPorts:\n- Node 1: HTTP 9080, RESP 8080, Gossip 7946\n- Node 2: HTTP 9081, RESP 8081, Gossip 7947\n- Node 3: HTTP 9082, RESP 8082, Gossip 7948\n\nRun requests in order for a full scenario walkthrough.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "node1_http",
+			"value": "http://localhost:9080",
+			"type": "string"
+		},
+		{
+			"key": "node2_http",
+			"value": "http://localhost:9081",
+			"type": "string"
+		},
+		{
+			"key": "node3_http",
+			"value": "http://localhost:9082",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Health & Cluster Status",
+			"description": "Verify all nodes are up and the cluster has formed correctly.",
+			"item": [
+				{
+					"name": "1.1 Health Check - Node 1",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Node 1 is healthy', () => pm.expect(body.healthy).to.be.true);",
+									"pm.test('Cluster size is 3', () => pm.expect(body.cluster_size).to.eql(3));",
+									"pm.test('Node ID is node-1', () => pm.expect(body.node).to.eql('node-1'));",
+									"pm.test('Has correlation ID', () => pm.expect(body.correlation_id).to.be.a('string'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/health",
+							"host": ["{{node1_http}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "1.2 Health Check - Node 2",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Node 2 is healthy', () => pm.expect(body.healthy).to.be.true);",
+									"pm.test('Cluster size is 3', () => pm.expect(body.cluster_size).to.eql(3));",
+									"pm.test('Node ID is node-2', () => pm.expect(body.node).to.eql('node-2'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node2_http}}/health",
+							"host": ["{{node2_http}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "1.3 Health Check - Node 3",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Node 3 is healthy', () => pm.expect(body.healthy).to.be.true);",
+									"pm.test('Cluster size is 3', () => pm.expect(body.cluster_size).to.eql(3));",
+									"pm.test('Node ID is node-3', () => pm.expect(body.node).to.eql('node-3'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node3_http}}/health",
+							"host": ["{{node3_http}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "1.4 Cluster Members - Node 1",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Has members array', () => pm.expect(body.members).to.be.an('array'));",
+									"pm.test('Total count is 3', () => pm.expect(body.total_count).to.eql(3));",
+									"pm.test('Has correlation ID', () => pm.expect(body.correlation_id).to.be.a('string'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cluster/members",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cluster", "members"]
+						}
+					}
+				},
+				{
+					"name": "1.5 Cluster Members - Node 2 (cross-verify)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Total count is 3', () => pm.expect(body.total_count).to.eql(3));",
+									"pm.test('Reports from node-2', () => pm.expect(body.node).to.eql('node-2'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node2_http}}/api/cluster/members",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cluster", "members"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Prometheus Metrics",
+			"description": "Verify the /metrics endpoint returns valid Prometheus exposition format.",
+			"item": [
+				{
+					"name": "2.1 Metrics - Node 1 (baseline)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const text = pm.response.text();",
+									"pm.test('Has items metric', () => pm.expect(text).to.include('hypercache_items_total'));",
+									"pm.test('Has memory metric', () => pm.expect(text).to.include('hypercache_memory_bytes'));",
+									"pm.test('Has hits metric', () => pm.expect(text).to.include('hypercache_hits_total'));",
+									"pm.test('Has misses metric', () => pm.expect(text).to.include('hypercache_misses_total'));",
+									"pm.test('Has cluster_healthy metric', () => pm.expect(text).to.include('hypercache_cluster_healthy'));",
+									"pm.test('Has cluster_size metric', () => pm.expect(text).to.include('hypercache_cluster_size'));",
+									"pm.test('Has up metric', () => pm.expect(text).to.include('hypercache_up'));",
+									"pm.test('Cluster healthy is 1', () => pm.expect(text).to.include('hypercache_cluster_healthy{node=\"node-1\"} 1'));",
+									"pm.test('Cluster size is 3', () => pm.expect(text).to.include('hypercache_cluster_size{node=\"node-1\"} 3'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/metrics",
+							"host": ["{{node1_http}}"],
+							"path": ["metrics"]
+						}
+					}
+				},
+				{
+					"name": "2.2 Metrics - Node 2",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const text = pm.response.text();",
+									"pm.test('Reports node-2 label', () => pm.expect(text).to.include('node=\"node-2\"'));",
+									"pm.test('Node is up', () => pm.expect(text).to.include('hypercache_up{node=\"node-2\"} 1'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node2_http}}/metrics",
+							"host": ["{{node2_http}}"],
+							"path": ["metrics"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Cache CRUD - Single Node",
+			"description": "Basic SET / GET / DELETE on a single node to confirm core cache operations.",
+			"item": [
+				{
+					"name": "3.1 SET key 'test:hello' on Node 1",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success is true', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Key is test:hello', () => pm.expect(body.data.key).to.eql('test:hello'));",
+									"pm.test('Value is stored', () => pm.expect(body.data.value).to.eql('world'));",
+									"pm.test('Node is node-1', () => pm.expect(body.node).to.eql('node-1'));",
+									"pm.test('Has correlation ID', () => pm.expect(body.correlation_id).to.be.a('string'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"world\"\n}"
+						},
+						"url": {
+							"raw": "{{node1_http}}/api/cache/test:hello",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "test:hello"]
+						}
+					}
+				},
+				{
+					"name": "3.2 GET key 'test:hello' from Node 1",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success is true', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Key matches', () => pm.expect(body.data.key).to.eql('test:hello'));",
+									"pm.test('Value is world', () => pm.expect(body.data.value).to.eql('world'));",
+									"pm.test('Response is local', () => pm.expect(body.local).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/test:hello",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "test:hello"]
+						}
+					}
+				},
+				{
+					"name": "3.3 GET non-existent key (expect 404)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 404', () => pm.response.to.have.status(404));",
+									"const body = pm.response.json();",
+									"pm.test('Success is false', () => pm.expect(body.success).to.be.false);",
+									"pm.test('Error says not found', () => pm.expect(body.error).to.include('not found'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/nonexistent:key",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "nonexistent:key"]
+						}
+					}
+				},
+				{
+					"name": "3.4 DELETE key 'test:hello' from Node 1",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success is true', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Key is test:hello', () => pm.expect(body.key).to.eql('test:hello'));",
+									"pm.test('Replicated flag set', () => pm.expect(body.replicated).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/test:hello",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "test:hello"]
+						}
+					}
+				},
+				{
+					"name": "3.5 Confirm deletion (expect 404)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 404', () => pm.response.to.have.status(404));",
+									"const body = pm.response.json();",
+									"pm.test('Success is false', () => pm.expect(body.success).to.be.false);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/test:hello",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "test:hello"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Cross-Node Replication",
+			"description": "Write to one node, read from others to verify gossip-based replication.",
+			"item": [
+				{
+					"name": "4.1 SET 'user:1' on Node 1",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Replicated', () => pm.expect(body.replicated).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"Alice\"\n}"
+						},
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:1"]
+						}
+					}
+				},
+				{
+					"name": "4.2 SET 'user:2' on Node 2",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"Bob\"\n}"
+						},
+						"url": {
+							"raw": "{{node2_http}}/api/cache/user:2",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cache", "user:2"]
+						}
+					}
+				},
+				{
+					"name": "4.3 SET 'user:3' on Node 3",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"Charlie\"\n}"
+						},
+						"url": {
+							"raw": "{{node3_http}}/api/cache/user:3",
+							"host": ["{{node3_http}}"],
+							"path": ["api", "cache", "user:3"]
+						}
+					}
+				},
+				{
+					"name": "4.4 Read 'user:1' from Node 2 (replication check)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"await new Promise(resolve => setTimeout(resolve, 2000));"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Value is Alice', () => pm.expect(body.data.value).to.eql('Alice'));",
+									"pm.test('Served by node-2', () => pm.expect(body.node).to.eql('node-2'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node2_http}}/api/cache/user:1",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cache", "user:1"]
+						}
+					}
+				},
+				{
+					"name": "4.5 Read 'user:1' from Node 3 (replication check)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Value is Alice', () => pm.expect(body.data.value).to.eql('Alice'));",
+									"pm.test('Served by node-3', () => pm.expect(body.node).to.eql('node-3'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node3_http}}/api/cache/user:1",
+							"host": ["{{node3_http}}"],
+							"path": ["api", "cache", "user:1"]
+						}
+					}
+				},
+				{
+					"name": "4.6 Read 'user:2' from Node 1 (replication check)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Value is Bob', () => pm.expect(body.data.value).to.eql('Bob'));",
+									"pm.test('Served by node-1', () => pm.expect(body.node).to.eql('node-1'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:2",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:2"]
+						}
+					}
+				},
+				{
+					"name": "4.7 Read 'user:3' from Node 1 (replication check)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Value is Charlie', () => pm.expect(body.data.value).to.eql('Charlie'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:3",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:3"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "5. Delete Replication",
+			"description": "Delete a key on one node and verify it is removed across the cluster.",
+			"item": [
+				{
+					"name": "5.1 DELETE 'user:2' from Node 3",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Success', () => pm.expect(body.success).to.be.true);",
+									"pm.test('Replicated', () => pm.expect(body.replicated).to.be.true);",
+									"pm.test('Issued by node-3', () => pm.expect(body.node).to.eql('node-3'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{node3_http}}/api/cache/user:2",
+							"host": ["{{node3_http}}"],
+							"path": ["api", "cache", "user:2"]
+						}
+					}
+				},
+				{
+					"name": "5.2 Verify 'user:2' gone from Node 1",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"await new Promise(resolve => setTimeout(resolve, 2000));"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 404', () => pm.response.to.have.status(404));",
+									"pm.test('Not found', () => pm.expect(pm.response.json().success).to.be.false);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:2",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:2"]
+						}
+					}
+				},
+				{
+					"name": "5.3 Verify 'user:2' gone from Node 2",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 404', () => pm.response.to.have.status(404));",
+									"pm.test('Not found', () => pm.expect(pm.response.json().success).to.be.false);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node2_http}}/api/cache/user:2",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cache", "user:2"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "6. Value Types & Edge Cases",
+			"description": "Test storing different value types and edge-case keys.",
+			"item": [
+				{
+					"name": "6.1 SET numeric value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": 42\n}"
+						},
+						"url": {
+							"raw": "{{node1_http}}/api/cache/counter:visits",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "counter:visits"]
+						}
+					}
+				},
+				{
+					"name": "6.2 GET numeric value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Value is 42', () => pm.expect(body.data.value).to.eql(42));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/counter:visits",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "counter:visits"]
+						}
+					}
+				},
+				{
+					"name": "6.3 SET boolean value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": true\n}"
+						},
+						"url": {
+							"raw": "{{node1_http}}/api/cache/feature:dark-mode",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "feature:dark-mode"]
+						}
+					}
+				},
+				{
+					"name": "6.4 SET JSON object value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": {\"name\": \"Alice\", \"age\": 30, \"active\": true}\n}"
+						},
+						"url": {
+							"raw": "{{node2_http}}/api/cache/profile:alice",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cache", "profile:alice"]
+						}
+					}
+				},
+				{
+					"name": "6.5 GET JSON object value",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"await new Promise(resolve => setTimeout(resolve, 2000));"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Value is object', () => pm.expect(body.data.value).to.be.an('object'));",
+									"pm.test('Has name', () => pm.expect(body.data.value.name).to.eql('Alice'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node2_http}}/api/cache/profile:alice",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cache", "profile:alice"]
+						}
+					}
+				},
+				{
+					"name": "6.6 SET long string value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\"\n}"
+						},
+						"url": {
+							"raw": "{{node3_http}}/api/cache/article:1:body",
+							"host": ["{{node3_http}}"],
+							"path": ["api", "cache", "article:1:body"]
+						}
+					}
+				},
+				{
+					"name": "6.7 Overwrite existing key",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"Alice-Updated\"\n}"
+						},
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:1"]
+						}
+					}
+				},
+				{
+					"name": "6.8 Verify overwrite",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Value updated', () => pm.expect(body.data.value).to.eql('Alice-Updated'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:1"]
+						}
+					}
+				},
+				{
+					"name": "6.9 PUT with invalid JSON body",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 400', () => pm.response.to.have.status(400));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "this is not json"
+						},
+						"url": {
+							"raw": "{{node1_http}}/api/cache/bad:request",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "bad:request"]
+						}
+					}
+				},
+				{
+					"name": "6.10 Unsupported HTTP method (PATCH)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 405', () => pm.response.to.have.status(405));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"nope\"\n}"
+						},
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:1"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "7. Bulk Load & Metrics Validation",
+			"description": "Insert several keys then verify metrics reflect the operations.",
+			"item": [
+				{
+					"name": "7.1 SET batch: session:a",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": \"sess-data-a\"}" },
+						"url": {
+							"raw": "{{node1_http}}/api/cache/session:a",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "session:a"]
+						}
+					},
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "7.2 SET batch: session:b",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": \"sess-data-b\"}" },
+						"url": {
+							"raw": "{{node2_http}}/api/cache/session:b",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cache", "session:b"]
+						}
+					},
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "7.3 SET batch: session:c",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": \"sess-data-c\"}" },
+						"url": {
+							"raw": "{{node3_http}}/api/cache/session:c",
+							"host": ["{{node3_http}}"],
+							"path": ["api", "cache", "session:c"]
+						}
+					},
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "7.4 SET batch: config:timeout",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": 30}" },
+						"url": {
+							"raw": "{{node1_http}}/api/cache/config:timeout",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "config:timeout"]
+						}
+					},
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "7.5 SET batch: config:retries",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": 5}" },
+						"url": {
+							"raw": "{{node2_http}}/api/cache/config:retries",
+							"host": ["{{node2_http}}"],
+							"path": ["api", "cache", "config:retries"]
+						}
+					},
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "7.6 Metrics after load - Node 1",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const text = pm.response.text();",
+									"pm.test('Items > 0', () => {",
+									"  const match = text.match(/hypercache_items_total\\{node=\"node-1\"\\} (\\d+)/);",
+									"  pm.expect(match).to.not.be.null;",
+									"  pm.expect(parseInt(match[1])).to.be.greaterThan(0);",
+									"});",
+									"pm.test('Hits > 0', () => {",
+									"  const match = text.match(/hypercache_hits_total\\{node=\"node-1\"\\} (\\d+)/);",
+									"  pm.expect(match).to.not.be.null;",
+									"  pm.expect(parseInt(match[1])).to.be.greaterThan(0);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/metrics",
+							"host": ["{{node1_http}}"],
+							"path": ["metrics"]
+						}
+					}
+				},
+				{
+					"name": "7.7 Metrics after load - Node 2",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const text = pm.response.text();",
+									"pm.test('Items > 0', () => {",
+									"  const match = text.match(/hypercache_items_total\\{node=\"node-2\"\\} (\\d+)/);",
+									"  pm.expect(match).to.not.be.null;",
+									"  pm.expect(parseInt(match[1])).to.be.greaterThan(0);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node2_http}}/metrics",
+							"host": ["{{node2_http}}"],
+							"path": ["metrics"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "8. Correlation ID Propagation",
+			"description": "Verify that correlation IDs are returned in responses and response headers.",
+			"item": [
+				{
+					"name": "8.1 Health with correlation ID header",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Has X-Correlation-ID header', () => {",
+									"  pm.expect(pm.response.headers.get('X-Correlation-ID')).to.be.a('string');",
+									"});",
+									"const body = pm.response.json();",
+									"pm.test('Body has correlation_id', () => pm.expect(body.correlation_id).to.be.a('string'));",
+									"pm.test('Header matches body', () => {",
+									"  pm.expect(pm.response.headers.get('X-Correlation-ID')).to.eql(body.correlation_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/health",
+							"host": ["{{node1_http}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "8.2 Cache GET returns correlation ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"pm.test('Has correlation_id in body', () => pm.expect(body.correlation_id).to.be.a('string'));",
+									"pm.test('Correlation ID is UUID format', () => {",
+									"  const uuid = body.correlation_id;",
+									"  pm.expect(uuid).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/user:1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "user:1"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "9. Cuckoo Filter",
+			"description": "Test the probabilistic Cuckoo filter — verifies negative lookups, stats, and false positive detection.",
+			"item": [
+				{
+					"name": "9.1 Filter Stats (baseline, empty)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Has stats object', () => pm.expect(body.stats).to.be.an('object'));",
+									"pm.test('Has size field', () => pm.expect(body.stats.size).to.be.a('number'));",
+									"pm.test('Has capacity', () => pm.expect(body.stats.capacity).to.be.a('number'));",
+									"pm.test('Has load_factor', () => pm.expect(body.stats.load_factor).to.be.a('number'));",
+									"pm.test('Has memory_usage', () => pm.expect(body.stats.memory_usage).to.be.a('number'));",
+									"pm.test('Has false_positive_rate', () => pm.expect(body.stats.false_positive_rate).to.be.a('number'));",
+									"pm.test('Has lookup_operations', () => pm.expect(body.stats.lookup_operations).to.be.a('number'));",
+									"pm.collectionVariables.set('baseline_size', body.stats.size);",
+									"pm.collectionVariables.set('baseline_adds', body.stats.successful_adds);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/filter/stats",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "filter", "stats"]
+						}
+					}
+				},
+				{
+					"name": "9.2 Filter Check — key that does NOT exist",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('filter_says is false (guaranteed no false negatives)', () => pm.expect(body.filter_says).to.be.false);",
+									"pm.test('actually_exists is false', () => pm.expect(body.actually_exists).to.be.false);",
+									"pm.test('false_positive is false', () => pm.expect(body.false_positive).to.be.false);",
+									"pm.test('Key matches', () => pm.expect(body.key).to.eql('never:existed:key'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/filter/check/never:existed:key",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "filter", "check", "never:existed:key"]
+						}
+					}
+				},
+				{
+					"name": "9.3 SET a key (adds to filter)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Success', () => pm.expect(pm.response.json().success).to.be.true);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": \"filter-test-value\"}" },
+						"url": {
+							"raw": "{{node1_http}}/api/cache/filter:test:key1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "filter:test:key1"]
+						}
+					}
+				},
+				{
+					"name": "9.4 Filter Check — key that EXISTS",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('filter_says is true', () => pm.expect(body.filter_says).to.be.true);",
+									"pm.test('actually_exists is true', () => pm.expect(body.actually_exists).to.be.true);",
+									"pm.test('false_positive is false', () => pm.expect(body.false_positive).to.be.false);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/filter/check/filter:test:key1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "filter", "check", "filter:test:key1"]
+						}
+					}
+				},
+				{
+					"name": "9.5 Filter Stats (after SET — verify add counted)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"const baseline = parseInt(pm.collectionVariables.get('baseline_adds') || '0');",
+									"pm.test('Successful adds increased', () => pm.expect(body.stats.successful_adds).to.be.greaterThan(baseline));",
+									"pm.test('Add operations > 0', () => pm.expect(body.stats.add_operations).to.be.greaterThan(0));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/filter/stats",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "filter", "stats"]
+						}
+					}
+				},
+				{
+					"name": "10.6 DELETE key, then check filter (filter retains fingerprint)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/cache/filter:test:key1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "filter:test:key1"]
+						}
+					}
+				},
+				{
+					"name": "9.7 Filter Check after DELETE (may show false positive)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('actually_exists is false (deleted)', () => pm.expect(body.actually_exists).to.be.false);",
+									"// filter_says may be true (false positive) or false (filter deleted it)",
+									"// Either outcome is valid — log it for observability",
+									"if (body.filter_says && !body.actually_exists) {",
+									"  console.log('Detected expected false positive after deletion');",
+									"}",
+									"pm.test('false_positive flag is accurate', () => {",
+									"  pm.expect(body.false_positive).to.eql(body.filter_says && !body.actually_exists);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/filter/check/filter:test:key1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "filter", "check", "filter:test:key1"]
+						}
+					}
+				},
+				{
+					"name": "9.8 Bulk SET — load filter with keys",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": \"bulk-1\"}" },
+						"url": {
+							"raw": "{{node1_http}}/api/cache/bulk:filter:1",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "cache", "bulk:filter:1"]
+						}
+					}
+				},
+				{
+					"name": "9.9 Bulk SET 2",
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }],
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": \"bulk-2\"}" },
+						"url": { "raw": "{{node1_http}}/api/cache/bulk:filter:2", "host": ["{{node1_http}}"], "path": ["api", "cache", "bulk:filter:2"] }
+					}
+				},
+				{
+					"name": "9.10 Bulk SET 3",
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }],
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\"value\": \"bulk-3\"}" },
+						"url": { "raw": "{{node1_http}}/api/cache/bulk:filter:3", "host": ["{{node1_http}}"], "path": ["api", "cache", "bulk:filter:3"] }
+					}
+				},
+				{
+					"name": "9.11 Filter Stats (after bulk — verify metrics)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const body = pm.response.json();",
+									"pm.test('Size > 0', () => pm.expect(body.stats.size).to.be.greaterThan(0));",
+									"pm.test('Load factor > 0', () => pm.expect(body.stats.load_factor).to.be.greaterThan(0));",
+									"pm.test('Successful adds > 0', () => pm.expect(body.stats.successful_adds).to.be.greaterThan(0));",
+									"pm.test('Lookup operations > 0', () => pm.expect(body.stats.lookup_operations).to.be.greaterThan(0));",
+									"pm.test('Memory usage > 0', () => pm.expect(body.stats.memory_usage).to.be.greaterThan(0));",
+									"pm.test('Capacity > size', () => pm.expect(body.stats.capacity).to.be.greaterThan(body.stats.size));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/api/filter/stats",
+							"host": ["{{node1_http}}"],
+							"path": ["api", "filter", "stats"]
+						}
+					}
+				},
+				{
+					"name": "9.12 Cleanup — DELETE bulk keys",
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }],
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/bulk:filter:1", "host": ["{{node1_http}}"], "path": ["api", "cache", "bulk:filter:1"] } }
+				},
+				{
+					"name": "9.13 Cleanup — DELETE bulk:filter:2",
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }],
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/bulk:filter:2", "host": ["{{node1_http}}"], "path": ["api", "cache", "bulk:filter:2"] } }
+				},
+				{
+					"name": "9.14 Cleanup — DELETE bulk:filter:3",
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }],
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/bulk:filter:3", "host": ["{{node1_http}}"], "path": ["api", "cache", "bulk:filter:3"] } }
+				}
+			]
+		},
+		{
+			"name": "10. Cleanup",
+			"description": "Delete all test keys to leave the cluster clean.",
+			"item": [
+				{
+					"name": "10.1 DELETE user:1",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/user:1", "host": ["{{node1_http}}"], "path": ["api", "cache", "user:1"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.2 DELETE user:3",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/user:3", "host": ["{{node1_http}}"], "path": ["api", "cache", "user:3"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.3 DELETE counter:visits",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/counter:visits", "host": ["{{node1_http}}"], "path": ["api", "cache", "counter:visits"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.4 DELETE feature:dark-mode",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/feature:dark-mode", "host": ["{{node1_http}}"], "path": ["api", "cache", "feature:dark-mode"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.5 DELETE profile:alice",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/profile:alice", "host": ["{{node1_http}}"], "path": ["api", "cache", "profile:alice"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.6 DELETE article:1:body",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/article:1:body", "host": ["{{node1_http}}"], "path": ["api", "cache", "article:1:body"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.7 DELETE session:a",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/session:a", "host": ["{{node1_http}}"], "path": ["api", "cache", "session:a"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.8 DELETE session:b",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/session:b", "host": ["{{node1_http}}"], "path": ["api", "cache", "session:b"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.9 DELETE session:c",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/session:c", "host": ["{{node1_http}}"], "path": ["api", "cache", "session:c"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.10 DELETE config:timeout",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/config:timeout", "host": ["{{node1_http}}"], "path": ["api", "cache", "config:timeout"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.11 DELETE config:retries",
+					"request": { "method": "DELETE", "header": [], "url": { "raw": "{{node1_http}}/api/cache/config:retries", "host": ["{{node1_http}}"], "path": ["api", "cache", "config:retries"] } },
+					"event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript" } }]
+				},
+				{
+					"name": "10.12 Final health check - all clean",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Still healthy', () => pm.expect(pm.response.json().healthy).to.be.true);",
+									"pm.test('Cluster intact', () => pm.expect(pm.response.json().cluster_size).to.eql(3));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{node1_http}}/health",
+							"host": ["{{node1_http}}"],
+							"path": ["health"]
+						}
+					}
+				}
+			]
+		}
+	]
+}

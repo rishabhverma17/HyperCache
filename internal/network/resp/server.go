@@ -408,7 +408,7 @@ func (s *Server) handleSet(cmd Command) ([]byte, error) {
 	}
 
 	key := cmd.Args[0]
-	value := []byte(cmd.Args[1])
+	value := []byte(cmd.Args[1]) // Store as []byte — Redis-native binary-safe storage
 
 	// Parse optional arguments (EX, PX, NX, XX, etc.)
 	var ttl time.Duration

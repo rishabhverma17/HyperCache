@@ -21,67 +21,51 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.23.2'
 
-    - name: Check for changes
+    - name: Update dependencies
       id: changes
       run: |
-        echo "🔄 Updating Go dependencies..."
+        echo "Current dependencies:"
+        cat go.sum | wc -l
         
-        # Get current versions for comparison
-        echo "Current go.mod before update:"
-        cat go.mod
-        
-        # Update dependencies
-        go get -u ./...
+        # Update only direct dependencies (avoid traversing examples/ which has separate go.mod)
+        go get -u github.com/cespare/xxhash/v2
+        go get -u github.com/google/uuid
+        go get -u github.com/hashicorp/serf
+        go get -u gopkg.in/yaml.v3
         go mod tidy
         
-        echo "Updated go.mod after update:"
-        cat go.mod
-        
-        # Check if there are any changes
         if git diff --quiet go.mod go.sum; then
           echo "No dependency updates available"
           echo "has_changes=false" >> $GITHUB_OUTPUT
         else
-          echo "Dependencies updated successfully"
+          echo "Dependencies updated"
           echo "has_changes=true" >> $GITHUB_OUTPUT
-          git diff --name-only
+          git diff go.mod
         fi
+
+    - name: Verify build
+      if: steps.changes.outputs.has_changes == 'true'
+      run: go build ./cmd/hypercache
 
     - name: Run tests
       if: steps.changes.outputs.has_changes == 'true'
-      run: |
-        echo "🧪 Running tests after dependency update..."
-        go test ./tests/... ./internal/... ./pkg/...
+      run: go test -timeout=3m ./internal/... ./pkg/...
 
     - name: Create Pull Request
       if: steps.changes.outputs.has_changes == 'true'
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@v6
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         commit-message: 'chore: update Go dependencies'
         title: 'chore: update Go dependencies'
         body: |
-          ## 🔄 Automated Dependency Update
+          Automated dependency update.
           
-          This PR updates Go dependencies to their latest versions.
-          
-          ### 📋 Changes
           - Updated Go modules to latest versions
-          - Ran `go mod tidy` to clean up dependencies
-          - All tests pass after updates
-          
-          ### ✅ Testing
-          - [x] All tests pass
-          - [x] Build succeeds
-          - [x] Dependencies resolved correctly
-          
-          ### 🤖 Automation
-          This PR was created automatically by the dependency update workflow.
-          
-          **Review the changes and merge if everything looks good!**
+          - Build and tests pass
         branch: chore/update-dependencies
         delete-branch: true

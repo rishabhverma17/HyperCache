@@ -1,0 +1,65 @@
+# HyperCache Node Configuration Template
+# This template is used to generate individual node configurations
+
+node:
+  id: "${NODE_ID}"
+  data_dir: "/tmp/hypercache/${NODE_ID}"
+
+network:
+  resp_bind_addr: "0.0.0.0"
+  resp_port: ${RESP_PORT}
+  http_bind_addr: "0.0.0.0" 
+  http_port: ${HTTP_PORT}
+  advertise_addr: "127.0.0.1"
+  gossip_port: ${GOSSIP_PORT}
+
+cluster:
+  seeds: [${CLUSTER_SEEDS}]
+  replication_factor: 3
+  consistency_level: "eventual"
+
+persistence:
+  enabled: true
+  strategy: "hybrid"
+  enable_aof: true
+  sync_policy: "everysec"
+  sync_interval: "1s"
+  snapshot_interval: "15m"
+  max_log_size: "100MB"
+  compression_level: 6
+  retain_logs: 3
+
+cache:
+  max_memory: "8GB"
+  default_ttl: "1h"
+  cuckoo_filter_fpp: 0.01
+
+storage:
+  wal_sync_interval: "10ms"
+  memtable_size: "64MB"
+  compaction_threads: 4
+
+stores:
+  - name: "default"
+    eviction_policy: "lru"
+    max_memory: "4GB"
+    default_ttl: "1h"
+  - name: "sessions"
+    eviction_policy: "ttl"
+    max_memory: "1GB"
+    default_ttl: "30m"
+  - name: "analytics"
+    eviction_policy: "lfu"
+    max_memory: "2GB"
+    default_ttl: "24h"
+
+# Logging Configuration
+logging:
+  level: "${LOG_LEVEL}"
+  enable_console: true
+  enable_file: true
+  log_dir: "logs"
+  log_file: "logs/${NODE_ID}.log"
+  buffer_size: 1000
+  max_file_size: "100MB"
+  max_files: 10

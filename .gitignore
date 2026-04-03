@@ -41,6 +41,7 @@ hypercache
 
 # Log files
 logs/*.log
+logs/
 
 # Data directories (cache persistence)
 data/
@@ -48,6 +49,11 @@ node-*/
 
 # Benchmark and test results
 benchmark-results/
+test-results/
+
+# Cluster runtime files
+cluster_pids.txt
+*.pid
 test-results/
 
 # Temporary files

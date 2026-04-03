@@ -21,14 +21,12 @@ jobs:
 
     - name: Create Release
       id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ github.ref }}
-        release_name: HyperCache ${{ github.ref }}
+        tag_name: ${{ github.ref_name }}
+        name: HyperCache ${{ github.ref_name }}
         body: |
-          ## HyperCache Release ${{ github.ref }}
+          ## HyperCache Release ${{ github.ref_name }}
           
           ### Features
           - Redis-compatible distributed cache
@@ -50,7 +48,7 @@ jobs:
           
           ### Docker
           ```bash
-          docker run -p 8080:8080 -p 9080:9080 ghcr.io/rishabhverma17/hypercache:${{ github.ref }}
+          docker run -p 8080:8080 -p 9080:9080 ghcr.io/rishabhverma17/hypercache:${{ github.ref_name }}
           ```
           
           See the [README](https://github.com/rishabhverma17/HyperCache#readme) for full documentation.
@@ -74,7 +72,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
 
@@ -105,14 +103,9 @@ jobs:
         echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
 
     - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./dist/${{ env.ARCHIVE_NAME }}
-        asset_name: ${{ env.ARCHIVE_NAME }}
-        asset_content_type: application/octet-stream
+        files: ./dist/${{ env.ARCHIVE_NAME }}
 
   docker-release:
     name: Build and Push Docker Image
@@ -274,11 +267,6 @@ jobs:
         echo "CHART_PACKAGE=$(ls hypercache-*.tgz)" >> $GITHUB_ENV
 
     - name: Upload Helm Chart
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./${{ env.CHART_PACKAGE }}
-        asset_name: ${{ env.CHART_PACKAGE }}
-        asset_content_type: application/gzip
+        files: ./${{ env.CHART_PACKAGE }}

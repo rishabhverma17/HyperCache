@@ -37,86 +37,129 @@
 
 ## 🚀 **Quick Start**
 
-### 🐳 Docker Deployment (Recommended)
+### Prerequisites
+- Go 1.23.2+
+- `redis-cli` (optional, for RESP testing)
+- Docker & Docker Compose (optional, for containerized deployment)
+
+### Local Cluster (3 nodes)
 ```bash
-# Build and start containerized cluster with monitoring
-./scripts/docker-deploy.sh deploy
+# Build and start a fresh 3-node cluster
+make cluster
 
-# Or pull from Docker Hub and start
-docker-compose -f docker-compose.cluster.yml up -d
+# Check cluster health
+curl -s http://localhost:9080/health | python3 -m json.tool
 
-# Test the cluster
-./scripts/docker-deploy.sh test
+# Stop the cluster
+make cluster-stop
+
+# Full reset (stop + wipe data/logs/binaries + restart)
+make cluster-stop && make clean && make cluster
 ```
 
-### 🔧 Local Development
+### Single Node
 ```bash
-# Start both cluster and monitoring stack
-./scripts/start-system.sh
-
-# Or start with clean data
-./scripts/start-system.sh --clean
+make run
 ```
 
-### 📊 Access Points
-- **HyperCache Nodes**: http://localhost:9080, 9081, 9082
-- **Grafana Dashboards**: http://localhost:3000 (admin/admin123)
-- **Elasticsearch**: http://localhost:9200
-- **Docker Hub**: `docker pull hypercache/hypercache:latest`
-
-## 🔥 **Deployment Options**
-
-### 🐳 **Docker (Production-Ready)**
+### Docker Deployment
 ```bash
-# Pull from Docker Hub
-docker pull hypercache/hypercache:latest
+# Build Docker image
+make docker-build
 
-# Start 3-node cluster with monitoring
-docker-compose -f docker-compose.cluster.yml up -d
+# Start full stack (3-node cluster + Elasticsearch + Grafana + Filebeat)
+make docker-up
 
-# Kubernetes deployment
+# Stop
+make docker-down
+```
+
+### Kubernetes
+```bash
 kubectl apply -f k8s/hypercache-cluster.yaml
 ```
 
-### 🔧 **Local Development**
-```bash
-# Build and start 3-node cluster
-./scripts/build-and-run.sh cluster
+### 📊 Access Points
+| Service | URL | Notes |
+|---------|-----|-------|
+| Node 1 HTTP API | http://localhost:9080 | Health, cache, filter, metrics |
+| Node 2 HTTP API | http://localhost:9081 | |
+| Node 3 HTTP API | http://localhost:9082 | |
+| Node 1 RESP | `redis-cli -p 8080` | Redis-compatible |
+| Node 2 RESP | `redis-cli -p 8081` | |
+| Node 3 RESP | `redis-cli -p 8082` | |
+| Prometheus Metrics | http://localhost:9080/metrics | Per-node metrics |
+| Grafana | http://localhost:3000 | admin / admin123 |
+| Elasticsearch | http://localhost:9200 | |
 
-# Or start single node
-./scripts/build-and-run.sh run node-1
+## 🧪 **Testing**
+
+### Unit Tests
+```bash
+make test-unit
 ```
 
-### 📊 **Monitoring Stack Only**  
+### Lint & Format
 ```bash
-# Start Elasticsearch, Grafana, and Filebeat
-docker-compose -f docker-compose.logging.yml up -d
+make lint
+make fmt
 ```
 
-### Test with Redis Client
+### Benchmarks
 ```bash
-# Using redis-cli (if installed)
-redis-cli -p 8080
-> SET mykey "Hello HyperCache"
-> GET mykey
-
-# Using Go client
-cd examples/resp-demo
-go run simple_demo.go
+make bench
 ```
 
-### HTTP API Testing
+### Postman Collection
+Import `HyperCache.postman_collection.json` into Postman for a full test suite covering:
+health, metrics, CRUD, cross-node replication, delete replication, value types, Cuckoo filter, and cleanup.
+
+### HTTP API Examples
 ```bash
-# Store data
-curl -X PUT http://localhost:9080/api/cache/testkey \
+# Store a key
+curl -X PUT http://localhost:9080/api/cache/mykey \
   -H "Content-Type: application/json" \
-  -d '{"value": "test value", "ttl_hours": 1}'
+  -d '{"value": "hello world"}'
 
-# Retrieve data
-curl http://localhost:9080/api/cache/testkey
+# Retrieve it
+curl http://localhost:9080/api/cache/mykey
 
-# Health check
-curl http://localhost:9080/health
+# Delete it
+curl -X DELETE http://localhost:9080/api/cache/mykey
+
+# Check Cuckoo filter stats
+curl http://localhost:9080/api/filter/stats
+
+# Prometheus metrics
+curl http://localhost:9080/metrics
+```
+
+### Redis CLI
+```bash
+redis-cli -p 8080 SET foo bar
+redis-cli -p 8080 GET foo
+redis-cli -p 8081 GET foo   # verify replication
+redis-cli -p 8080 DEL foo
+redis-cli -p 8080 INFO
+redis-cli -p 8080 DBSIZE
+```
+
+### Makefile Reference
+```
+make build           Build the binary
+make run             Run single node (RESP)
+make cluster         Start 3-node local cluster
+make cluster-stop    Stop all HyperCache processes
+make clean           Remove binaries, logs, data
+make test-unit       Run unit tests with coverage
+make test-integration Run integration tests
+make bench           Run benchmarks
+make lint            Run golangci-lint
+make fmt             Format code
+make docker-build    Build Docker image
+make docker-up       Start Docker stack
+make docker-down     Stop Docker stack
+make deps            Download and tidy dependencies
 ```
 
 ## 🏆 **Key Features**
@@ -267,37 +310,12 @@ docker stats hypercache-elasticsearch hypercache-grafana
 tar -czf hypercache-backup-$(date +%Y%m%d).tar.gz data/
 ```
 
-## 🧪 **Testing & Development**
+## 📖 **Documentation**
 
-### Run All Tests
-```bash
-go test ./internal/... -v
-```
-
-### Run Benchmarks  
-```bash
-go test ./internal/... -bench=. -benchmem
-```
-
-### Cluster Testing
-```bash
-# Start cluster and test
-./scripts/build-and-run.sh cluster
-
-# Test HTTP API
-curl -X PUT http://localhost:9080/api/cache/test \
-  -d '{"value":"hello cluster","ttl_hours":1}'
-curl http://localhost:9080/api/cache/test
-
-# Test RESP protocol  
-redis-cli -p 8080 SET mykey "test value"
-redis-cli -p 8080 GET mykey
-```
-
-### Load Testing
-```bash
-# Generate load for dashboard testing
-./scripts/generate-dashboard-load.sh
+See [docs/README.md](docs/README.md) for the full documentation index:
+- **Architecture** — Consistent hashing, Cuckoo filter internals, RESP protocol, Raft consensus
+- **Guides** — Development setup, Docker, observability, multi-VM deployment
+- **Reference** — Benchmarks, persistence paths, known issues
 ```
 
 ### Clean Up

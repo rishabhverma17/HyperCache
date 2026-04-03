@@ -19,7 +19,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
 
@@ -38,6 +38,12 @@ jobs:
 
     - name: Verify dependencies
       run: go mod verify
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
 
     - name: Install additional tools
       run: sudo apt-get update && sudo apt-get install -y bc
@@ -58,13 +64,13 @@ jobs:
           COVERAGE=$(go tool cover -func=test-results/coverage.out | tail -1 | grep -o '[0-9]\+\.[0-9]\+%' | sed 's/%//')
           echo "Overall coverage: ${COVERAGE}%"
           
-          # Set minimum threshold for development (20%)
-          THRESHOLD=20
+          # Enforce minimum coverage threshold
+          THRESHOLD=50
           if (( $(echo "$COVERAGE >= $THRESHOLD" | bc -l) )); then
-            echo "✅ Coverage meets development threshold: ${COVERAGE}% >= ${THRESHOLD}%"
+            echo "✅ Coverage meets threshold: ${COVERAGE}% >= ${THRESHOLD}%"
           else
-            echo "⚠️ Coverage below threshold but acceptable for development: ${COVERAGE}% < ${THRESHOLD}%"
-            echo "💡 Coverage will improve as more tests are added"
+            echo "❌ Coverage below threshold: ${COVERAGE}% < ${THRESHOLD}%"
+            exit 1
           fi
           
           # Generate HTML coverage report
@@ -83,7 +89,7 @@ jobs:
           coverage.html
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       if: always()
       with:
         file: ./test-results/coverage.out
@@ -91,7 +97,7 @@ jobs:
         name: codecov-umbrella
 
   integration-tests:
-    name: Integration Tests
+    name: Integration Tests (Newman)
     runs-on: ubuntu-latest
     needs: unit-tests
 
@@ -100,105 +106,59 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
 
-    - name: Cache Go modules
-      uses: actions/cache@v4
+    - name: Set up Node.js (for Newman)
+      uses: actions/setup-node@v4
       with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+        node-version: '20'
 
-    - name: Download dependencies
-      run: go mod download
+    - name: Install Newman
+      run: npm install -g newman
 
-    - name: Start test cluster
+    - name: Build HyperCache
       run: |
-        # Clean any existing processes and persistence data
-        pkill -f hypercache || true
-        sleep 2
-        rm -rf data/ logs/ || true
-        
-        # Create required directories
-        mkdir -p bin logs data/node-{1,2,3}
-        
-        # Build HyperCache
+        mkdir -p bin logs
         go build -v -o bin/hypercache ./cmd/hypercache
-        
-        # Start 3-node cluster using the script if configs exist, otherwise simple startup
-        echo "🚀 Starting 3-node HyperCache cluster for testing..."
-        
-        if [ -f "configs/node1-config.yaml" ] && [ -f "scripts/start-cluster.sh" ]; then
-          # Use the existing cluster script
-          chmod +x scripts/start-cluster.sh
-          ./scripts/start-cluster.sh cluster
-        else
-          # Fallback: Start nodes directly
-          echo "⚠️ Using fallback cluster startup (configs not found)"
-          
-          # Node 1 - HTTP API on 9080, RESP on 8080
-          ./bin/hypercache -node-id=node-1 -bind=127.0.0.1:8080 -port=8080 > logs/node-1.log 2>&1 &
-          NODE1_PID=$!
-          
-          # Node 2 - HTTP API on 9081, RESP on 8081  
-          ./bin/hypercache -node-id=node-2 -bind=127.0.0.1:8081 -port=8081 > logs/node-2.log 2>&1 &
-          NODE2_PID=$!
-          
-          # Node 3 - HTTP API on 9082, RESP on 8082
-          ./bin/hypercache -node-id=node-3 -bind=127.0.0.1:8082 -port=8082 > logs/node-3.log 2>&1 &
-          NODE3_PID=$!
-          
-          # Save PIDs for cleanup
-          echo "$NODE1_PID $NODE2_PID $NODE3_PID" > cluster_pids.txt
-        fi
-        
-        # Wait for cluster to stabilize
-        echo "⏳ Waiting 10 seconds for cluster to stabilize..."
-        sleep 10
-        
-        echo "✅ Cluster started successfully"
 
-    - name: Run integration tests
+    - name: Start 3-node cluster
       run: |
-        echo "🧪 Running integration tests directly with Go..."
-        mkdir -p test-results
+        rm -rf /tmp/hypercache
+        mkdir -p /tmp/hypercache/node-{1,2,3}
         
-        # Run integration tests with proper timeout
-        go test -v -timeout=5m ./tests/integration/... | tee test-results/integration-output.txt
+        ./bin/hypercache -protocol resp -config configs/node1-config.yaml > logs/node-1.log 2>&1 &
+        sleep 3
+        ./bin/hypercache -protocol resp -config configs/node2-config.yaml > logs/node-2.log 2>&1 &
+        sleep 3
+        ./bin/hypercache -protocol resp -config configs/node3-config.yaml > logs/node-3.log 2>&1 &
+        sleep 5
         
-        echo "✅ Integration tests completed"
+        # Verify cluster is healthy
+        for port in 9080 9081 9082; do
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$port/health)
+          if [ "$STATUS" != "200" ]; then
+            echo "Node on port $port not healthy (status: $STATUS)"
+            cat logs/node-*.log
+            exit 1
+          fi
+        done
+        echo "Cluster is healthy (3 nodes)"
 
-    - name: Cleanup test cluster
+    - name: Run Postman collection via Newman
+      run: |
+        newman run HyperCache.postman_collection.json \
+          --delay-request 500 \
+          --timeout-request 10000 \
+          --reporters cli,json \
+          --reporter-json-export test-results/newman-results.json
+
+    - name: Cleanup
       if: always()
-      run: |
-        echo "🧹 Cleaning up test cluster..."
-        
-        # Try to use cleanup script first
-        if [ -f "scripts/clean-persistence.sh" ]; then
-          chmod +x scripts/clean-persistence.sh
-          ./scripts/clean-persistence.sh --all || true
-        fi
-        
-        # Manual cleanup
-        if [ -f cluster_pids.txt ]; then
-          for pid in $(cat cluster_pids.txt); do
-            kill $pid 2>/dev/null || true
-          done
-          rm -f cluster_pids.txt
-        fi
-        
-        # Kill any remaining hypercache processes
-        pkill -f hypercache || true
-        sleep 2
-        
-        echo "✅ Cleanup completed"
+      run: pkill -f bin/hypercache 2>/dev/null || true
 
-    - name: Upload integration test results
+    - name: Upload test results
       uses: actions/upload-artifact@v4
       if: always()
       with:
@@ -206,75 +166,3 @@ jobs:
         path: |
           test-results/
           logs/
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
-    - name: Download dependencies
-      run: go mod download
-
-    - name: Verify dependencies
-      run: go mod verify
-
-    - name: Build binary
-      run: |
-        mkdir -p bin
-        go build -v -o bin/hypercache ./cmd/hypercache
-
-    - name: Test binary execution
-      run: |
-        chmod +x bin/hypercache
-        timeout 10s ./bin/hypercache --help || true
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: hypercache-binary
-        path: bin/hypercache
-
-  notify:
-    name: Notify
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, build]
-    if: always()
-
-    steps:
-    - name: Notify success
-      if: ${{ needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success' && needs.build.result == 'success' }}
-      run: |
-        echo "🎉 HyperCache CI pipeline completed successfully!"
-        echo "✅ Unit tests passed with coverage analysis"
-        echo "✅ Integration tests passed (direct Go test execution)"
-        echo "✅ Build successful"
-        echo "✅ All components validated successfully"
-
-    - name: Notify failure
-      if: ${{ needs.unit-tests.result == 'failure' || needs.integration-tests.result == 'failure' || needs.build.result == 'failure' }}
-      run: |
-        echo "❌ HyperCache CI pipeline failed!"
-        echo "Unit Tests: ${{ needs.unit-tests.result }}"
-        echo "Integration Tests: ${{ needs.integration-tests.result }}"
-        echo "Build: ${{ needs.build.result }}"
-        echo "Please check the logs for details."
-        exit 1

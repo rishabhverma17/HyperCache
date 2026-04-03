@@ -1,10 +1,9 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sync"
@@ -132,13 +131,13 @@ func serializeValue(value interface{}) ([]byte, string, error) {
 		}
 		return []byte{0}, valueType, nil
 	default:
-		// Use gob encoding for complex types
-		var buf bytes.Buffer
-		encoder := gob.NewEncoder(&buf)
-		if err := encoder.Encode(v); err != nil {
+		// Use JSON encoding for complex types (maps, slices, structs)
+		// JSON roundtrips cleanly with interface{} unlike gob
+		data, err := json.Marshal(v)
+		if err != nil {
 			return nil, "", fmt.Errorf("failed to encode value: %w", err)
 		}
-		return buf.Bytes(), valueType, nil
+		return data, valueType, nil
 	}
 }
 
@@ -199,11 +198,9 @@ func deserializeValue(data []byte, valueType string) (interface{}, error) {
 		}
 		return data[0] != 0, nil
 	default:
-		// Use gob decoding for complex types
-		buf := bytes.NewBuffer(data)
-		decoder := gob.NewDecoder(buf)
+		// Use JSON decoding for complex types
 		var result interface{}
-		if err := decoder.Decode(&result); err != nil {
+		if err := json.Unmarshal(data, &result); err != nil {
 			return nil, fmt.Errorf("failed to decode value: %w", err)
 		}
 		return result, nil
@@ -600,6 +597,14 @@ func (s *BasicStore) FilterStats() *filter.FilterStats {
 		return nil
 	}
 	return s.filter.GetStats()
+}
+
+// FilterContains checks if the cuckoo filter thinks a key might exist (probabilistic)
+func (s *BasicStore) FilterContains(key string) bool {
+	if s.filter == nil {
+		return false
+	}
+	return s.filter.Contains([]byte(key))
 }
 
 // Close shuts down the store and cleans up resources
