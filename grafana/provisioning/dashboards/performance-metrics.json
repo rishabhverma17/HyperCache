@@ -18,9 +18,9 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [
-        { "query": "message:\"status_code\" AND message:\"200\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "200 OK" },
-        { "query": "message:\"status_code\" AND message:\"404\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "404 Not Found" },
-        { "query": "message:\"status_code\" AND message:\"400\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "400 Bad Request" }
+        { "query": "message:status_code AND message:200", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "200 OK" },
+        { "query": "message:status_code AND message:404", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "404 Not Found" },
+        { "query": "message:status_code AND message:400", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "400 Bad Request" }
       ]
     },
     {
@@ -30,7 +30,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         { "query": "message:\"GET operation successful\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Cache Hit" },
-        { "query": "message:\"key not found\" OR message:\"not found\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Cache Miss" }
+        { "query": "message:\"key not found\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Cache Miss" }
       ]
     },
     {
@@ -39,8 +39,8 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
-        { "query": "message:\"SUCCESS\" AND message:\"Replicated SET\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "SET Replicated" },
-        { "query": "message:\"SUCCESS\" AND message:\"Replicated DELETE\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "DELETE Replicated" }
+        { "query": "message:SUCCESS AND message:\"Replicated SET\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "SET Replicated" },
+        { "query": "message:SUCCESS AND message:\"Replicated DELETE\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "DELETE Replicated" }
       ]
     },
     {
@@ -48,7 +48,7 @@
       "type": "piechart",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
-      "targets": [{ "query": "message:\"HTTP request\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name.keyword", "id": "2", "settings": { "size": "5" } }], "timeField": "@timestamp" }]
+      "targets": [{ "query": "message:\"HTTP request\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name", "id": "2", "settings": { "size": "5", "order": "desc", "orderBy": "1" } }], "timeField": "@timestamp" }]
     },
     {
       "title": "Replication Success vs Failure",
@@ -56,19 +56,19 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
       "targets": [
-        { "query": "message:\"SUCCESS\" AND message:Replicated", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Success" },
-        { "query": "message:\"Failed to replicate\" OR message:\"Failed to apply replicated\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Failed" }
+        { "query": "message:SUCCESS AND message:Replicated", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name", "id": "2", "settings": { "size": "5", "order": "desc", "orderBy": "1" } }], "timeField": "@timestamp", "alias": "Success" },
+        { "query": "message:\"Failed to replicate\" OR message:\"Failed to apply\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name", "id": "2", "settings": { "size": "5", "order": "desc", "orderBy": "1" } }], "timeField": "@timestamp", "alias": "Failed" }
       ]
     },
     {
-      "title": "Methods Breakdown (PUT/GET/DELETE/PATCH)",
+      "title": "HTTP Methods (PUT/GET/DELETE)",
       "type": "piechart",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
       "targets": [
-        { "query": "message:\"method\" AND message:\"PUT\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "PUT" },
-        { "query": "message:\"method\" AND message:\"GET\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "GET" },
-        { "query": "message:\"method\" AND message:\"DELETE\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "DELETE" }
+        { "query": "message:method AND message:PUT", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name", "id": "2", "settings": { "size": "5", "order": "desc", "orderBy": "1" } }], "timeField": "@timestamp", "alias": "PUT" },
+        { "query": "message:method AND message:GET AND NOT message:health", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name", "id": "2", "settings": { "size": "5", "order": "desc", "orderBy": "1" } }], "timeField": "@timestamp", "alias": "GET" },
+        { "query": "message:method AND message:DELETE", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name", "id": "2", "settings": { "size": "5", "order": "desc", "orderBy": "1" } }], "timeField": "@timestamp", "alias": "DELETE" }
       ]
     }
   ],
@@ -77,5 +77,5 @@
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "title": "HyperCache Performance Metrics",
-  "uid": "hypercache-perf-v1"
+  "uid": "hypercache-perf-v2"
 }
