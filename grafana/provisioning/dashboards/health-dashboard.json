@@ -6,7 +6,7 @@
       "type": "stat",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
-      "targets": [{ "query": "*", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+      "targets": [{ "query": "container.name:hypercache-node*", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
       "options": { "reduceOptions": { "calcs": ["sum"] } },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
     },
@@ -15,7 +15,7 @@
       "type": "stat",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
-      "targets": [{ "query": "message:ERROR", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+      "targets": [{ "query": "container.name:hypercache-node* AND message:\"level\\\":\\\"ERROR\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
       "options": { "reduceOptions": { "calcs": ["sum"] } },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } }
     },
@@ -24,7 +24,7 @@
       "type": "stat",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
-      "targets": [{ "query": "message:\"Cache SET operation\" OR message:\"Cache GET operation\" OR message:\"Cache DELETE operation\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+      "targets": [{ "query": "container.name:hypercache-node* AND (message:\"Cache SET operation\" OR message:\"Cache GET operation\" OR message:\"Cache DELETE operation\")", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
       "options": { "reduceOptions": { "calcs": ["sum"] } },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "blue", "value": null }] } } }
     },
@@ -33,7 +33,7 @@
       "type": "stat",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
-      "targets": [{ "query": "message:REPLICATION OR message:replication", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+      "targets": [{ "query": "container.name:hypercache-node* AND message:\"replication\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
       "options": { "reduceOptions": { "calcs": ["sum"] } },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "purple", "value": null }] } } }
     },
@@ -42,14 +42,19 @@
       "type": "timeseries",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 5 },
-      "targets": [{ "query": "*", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp" }]
+      "targets": [{ "query": "container.name:hypercache-node*", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp" }]
     },
     {
       "title": "Logs by Node",
       "type": "piechart",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 13 },
-      "targets": [{ "query": "*", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "terms", "field": "container.name.keyword", "id": "2", "settings": { "size": "10" } }], "timeField": "@timestamp" }]
+      "targets": [
+        { "refId": "A", "query": "container.name:hypercache-node1", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 1" },
+        { "refId": "B", "query": "container.name:hypercache-node2", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 2" },
+        { "refId": "C", "query": "container.name:hypercache-node3", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 3" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["sum"] }, "legend": { "displayMode": "list", "placement": "bottom" } }
     },
     {
       "title": "Operations Over Time",
@@ -57,9 +62,9 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 16, "x": 8, "y": 13 },
       "targets": [
-        { "query": "message:\"PUT\" AND message:\"cache\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "SET" },
-        { "query": "message:\"GET\" AND message:\"cache\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "GET" },
-        { "query": "message:\"DELETE\" AND message:\"cache\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "DELETE" }
+        { "refId": "A", "query": "container.name:hypercache-node* AND message:\"Cache PUT operation started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "SET" },
+        { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Cache GET operation started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "GET" },
+        { "refId": "C", "query": "container.name:hypercache-node* AND message:\"Cache DELETE operation started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "DELETE" }
       ]
     },
     {
@@ -67,7 +72,7 @@
       "type": "logs",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 21 },
-      "targets": [{ "query": "*", "metrics": [{ "type": "logs", "id": "1" }], "timeField": "@timestamp" }],
+      "targets": [{ "query": "container.name:hypercache-node*", "metrics": [{ "type": "logs", "id": "1" }], "timeField": "@timestamp" }],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
     }
   ],

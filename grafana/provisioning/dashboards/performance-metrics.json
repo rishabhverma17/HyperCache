@@ -18,9 +18,9 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [
-        { "query": "message:status_code AND message:200", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "200 OK" },
-        { "query": "message:status_code AND message:404", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "404 Not Found" },
-        { "query": "message:status_code AND message:400", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "400 Bad Request" }
+        { "query": "container.name:hypercache-node* AND message:status_code AND message:200", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "200 OK" },
+        { "query": "container.name:hypercache-node* AND message:status_code AND message:404", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "404 Not Found" },
+        { "query": "container.name:hypercache-node* AND message:status_code AND message:400", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "400 Bad Request" }
       ]
     },
     {

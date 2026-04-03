@@ -12,13 +12,11 @@ filebeat.inputs:
     log_type: application
   fields_under_root: true
 
-# Docker container logs (optional - for system events)
+# Docker container logs - only HyperCache node containers
 - type: container
   enabled: true
   paths:
     - '/var/lib/docker/containers/*/*.log'
-  containers.ids:
-    - "hypercache-*"
   fields:
     hypercache_service: hypercache
     environment: docker
@@ -30,7 +28,14 @@ processors:
 - add_docker_metadata:
     host: "unix:///var/run/docker.sock"
 
-# Extract container name and image
+# Drop logs from non-HyperCache-node containers (Grafana, Elasticsearch, Filebeat, volume-init)
+- drop_event:
+    when:
+      not:
+        regexp:
+          container.name: "^hypercache-node[0-9]+$"
+
+# Extract node ID from container name
 - script:
     lang: javascript
     source: >
@@ -42,11 +47,6 @@ processors:
           }
         }
       }
-
-# Enrich with Kubernetes metadata if deployed in K8s
-- add_kubernetes_metadata:
-    when.equals:
-      kubernetes.pod.name: "hypercache-*"
 
 output.elasticsearch:
   hosts: ["hypercache-elasticsearch:9200"]

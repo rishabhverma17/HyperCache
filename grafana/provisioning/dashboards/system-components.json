@@ -6,7 +6,7 @@
       "type": "timeseries",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "targets": [{ "query": "message:HTTP AND message:request", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp" }]
+      "targets": [{ "query": "container.name:hypercache-node* AND message:\"HTTP request started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp" }]
     },
     {
       "title": "Cuckoo Filter Activity",
@@ -14,8 +14,8 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
-        { "query": "message:\"cuckoo filter\" AND message:add", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Filter Add" },
-        { "query": "message:\"Cuckoo filter early rejection\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Filter Reject" }
+        { "refId": "A", "query": "container.name:hypercache-node* AND message:\"added to cuckoo filter\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Filter Add" },
+        { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Cuckoo filter early rejection\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Filter Reject" }
       ]
     },
     {
@@ -24,8 +24,9 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
-        { "query": "message:EventMemberJoin", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Member Join" },
-        { "query": "message:topology_changed", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Topology Change" }
+        { "refId": "A", "query": "container.name:hypercache-node* AND message:\"Node joined\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Node Join" },
+        { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Node left\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Node Left" },
+        { "refId": "C", "query": "container.name:hypercache-node* AND message:\"Node failed\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Node Failed" }
       ]
     },
     {
@@ -34,8 +35,8 @@
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "targets": [
-        { "query": "message:AOF", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "AOF" },
-        { "query": "message:Snapshot", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Snapshot" }
+        { "refId": "A", "query": "container.name:hypercache-node* AND message:\"AOF replay\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "AOF" },
+        { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Snapshot created\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Snapshot" }
       ]
     },
     {
@@ -43,7 +44,7 @@
       "type": "logs",
       "datasource": "HyperCache Logs",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "targets": [{ "query": "message:ERROR OR message:WARN OR message:error", "metrics": [{ "type": "logs", "id": "1" }], "timeField": "@timestamp" }],
+      "targets": [{ "query": "container.name:hypercache-node* AND (message:\"level\\\":\\\"ERROR\" OR message:\"level\\\":\\\"WARN\")", "metrics": [{ "type": "logs", "id": "1" }], "timeField": "@timestamp" }],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
     }
   ],
