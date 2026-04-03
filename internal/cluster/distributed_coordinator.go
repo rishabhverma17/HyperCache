@@ -19,6 +19,7 @@ type DistributedCoordinator struct {
 	membership *GossipMembership
 	hashRing   *HashRing
 	eventBus   *DistributedEventBus
+	clock      *LamportClock
 
 	// State management
 	startTime time.Time
@@ -54,6 +55,7 @@ func NewDistributedCoordinator(config ClusterConfig) (*DistributedCoordinator, e
 		membership:    membership,
 		hashRing:      hashRing,
 		eventBus:      eventBus,
+		clock:         NewLamportClock(),
 		lastHeartbeat: time.Now(),
 	}
 
@@ -172,6 +174,11 @@ func (dc *DistributedCoordinator) GetRouting() RoutingProvider {
 // GetEventBus implements CoordinatorService.GetEventBus
 func (dc *DistributedCoordinator) GetEventBus() EventBus {
 	return dc.eventBus
+}
+
+// GetClock implements CoordinatorService.GetClock
+func (dc *DistributedCoordinator) GetClock() *LamportClock {
+	return dc.clock
 }
 
 // TriggerRebalance implements CoordinatorService.TriggerRebalance

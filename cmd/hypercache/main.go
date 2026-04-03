@@ -229,7 +229,7 @@ func main() {
 				for {
 					select {
 					case event := <-eventsChan:
-						handleReplicationEvent(shutdownCtx, event, store, cfg.Node.ID)
+						handleReplicationEvent(shutdownCtx, event, store, cfg.Node.ID, coord)
 					case <-shutdownCtx.Done():
 						logging.Info(shutdownCtx, logging.ComponentCluster, logging.ActionStop, "Event subscription stopping", map[string]interface{}{
 							"node_id": cfg.Node.ID,
@@ -621,16 +621,23 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				eventBus := coordinator.GetEventBus()
 
 				// Create SET event with correlation ID
+				// Tick the Lamport clock for this write
+				lamportTS := uint64(0)
+				if coordinator.GetClock() != nil {
+					lamportTS = coordinator.GetClock().Tick()
+				}
+
 				setEvent := cluster.ClusterEvent{
 					Type:          cluster.EventDataOperation,
 					NodeID:        nodeID,
 					CorrelationID: logging.GetCorrelationID(r.Context()),
 					Timestamp:     time.Now(),
 					Data: map[string]interface{}{
-						"operation": "SET",
-						"key":       key,
-						"value":     requestBody.Value,
-						"ttl":       ttl.Seconds(),
+						"operation":  "SET",
+						"key":        key,
+						"value":      requestBody.Value,
+						"ttl":        ttl.Seconds(),
+						"lamport_ts": lamportTS,
 					},
 				}
 
@@ -701,6 +708,12 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 			if existed && coordinator != nil && coordinator.GetEventBus() != nil {
 				eventBus := coordinator.GetEventBus()
 
+				// Tick the Lamport clock for this delete
+				lamportTS := uint64(0)
+				if coordinator.GetClock() != nil {
+					lamportTS = coordinator.GetClock().Tick()
+				}
+
 				// Create DELETE event with correlation ID
 				deleteEvent := cluster.ClusterEvent{
 					Type:          cluster.EventDataOperation,
@@ -708,8 +721,9 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 					CorrelationID: logging.GetCorrelationID(r.Context()),
 					Timestamp:     time.Now(),
 					Data: map[string]interface{}{
-						"operation": "DELETE",
-						"key":       key,
+						"operation":  "DELETE",
+						"key":        key,
+						"lamport_ts": lamportTS,
 					},
 				}
 
@@ -767,7 +781,7 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 }
 
 // handleReplicationEvent processes incoming replication events from other nodes
-func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, store *storage.BasicStore, nodeID string) {
+func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, store *storage.BasicStore, nodeID string, coordinator cluster.CoordinatorService) {
 	// Skip events from ourselves — no need to log, the originating request already has full tracing
 	if event.NodeID == nodeID {
 		return
@@ -803,6 +817,19 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 			return
 		}
 
+		// Extract Lamport timestamp from the event
+		var lamportTS uint64
+		if tsInterface, exists := eventData["lamport_ts"]; exists {
+			if tsFloat, ok := tsInterface.(float64); ok {
+				lamportTS = uint64(tsFloat)
+			}
+		}
+
+		// Witness the remote clock to advance our own
+		if coordinator.GetClock() != nil && lamportTS > 0 {
+			coordinator.GetClock().Witness(lamportTS)
+		}
+
 		switch operation {
 		case "SET":
 			value := eventData["value"] // Accept any type — store handles serialization
@@ -814,33 +841,45 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 				}
 			}
 
-			// Apply the replicated SET operation
-			logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Applying replicated SET operation", map[string]interface{}{
-				"key":   key,
-				"value": value,
-				"ttl":   ttl.String(),
-			})
-
-			if err := store.SetWithContext(correlationCtx, key, value, "replication", ttl); err != nil {
+			// Use SetWithTimestamp to enforce causal ordering —
+			// only overwrite if the incoming timestamp is newer
+			applied, err := store.SetWithTimestamp(correlationCtx, key, value, "replication", ttl, lamportTS)
+			if err != nil {
 				logging.Error(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Failed to apply replicated SET", err, map[string]interface{}{
-					"key": key,
+					"key":        key,
+					"lamport_ts": lamportTS,
+				})
+			} else if applied {
+				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Successfully applied replicated SET", map[string]interface{}{
+					"key":        key,
+					"lamport_ts": lamportTS,
 				})
 			} else {
-				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Successfully applied replicated SET", map[string]interface{}{
-					"key": key,
+				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Skipped stale replicated SET (local is newer)", map[string]interface{}{
+					"key":            key,
+					"remote_ts":      lamportTS,
+					"local_ts":       store.GetTimestamp(key),
 				})
 			}
 
 		case "DELETE":
 			// Apply the replicated DELETE operation — idempotent, key may already be gone
-			if err := store.Delete(key); err != nil {
-				// Key already deleted or never existed on this node — normal in eventual consistency
+			// For deletes, check timestamp: don't delete if a newer SET has occurred locally
+			localTS := store.GetTimestamp(key)
+			if lamportTS > 0 && localTS > lamportTS {
+				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Skipped stale replicated DELETE (local SET is newer)", map[string]interface{}{
+					"key":       key,
+					"remote_ts": lamportTS,
+					"local_ts":  localTS,
+				})
+			} else if err := store.Delete(key); err != nil {
 				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Replicated DELETE (key already absent)", map[string]interface{}{
 					"key": key,
 				})
 			} else {
 				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Successfully applied replicated DELETE", map[string]interface{}{
-					"key": key,
+					"key":        key,
+					"lamport_ts": lamportTS,
 				})
 			}
 

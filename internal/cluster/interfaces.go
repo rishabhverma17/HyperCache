@@ -220,6 +220,9 @@ type CoordinatorService interface {
 	// Get event bus
 	GetEventBus() EventBus
 
+	// Get the Lamport clock for causal ordering
+	GetClock() *LamportClock
+
 	// Trigger rebalancing
 	TriggerRebalance(ctx context.Context) error
 

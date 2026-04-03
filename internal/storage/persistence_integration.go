@@ -183,15 +183,16 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 	}
 
 	item := &CacheItem{
-		Key:          key,
-		ValuePtr:     allocatedMemory,
-		ValueType:    valueType,
-		Size:         size,
-		CreatedAt:    time.Now(),
-		ExpiresAt:    expiresAt,
-		SessionID:    sessionID,
-		AccessCount:  0,
-		LastAccessed: time.Now(),
+		Key:              key,
+		ValuePtr:         allocatedMemory,
+		ValueType:        valueType,
+		Size:             size,
+		CreatedAt:        time.Now(),
+		ExpiresAt:        expiresAt,
+		SessionID:        sessionID,
+		AccessCount:      0,
+		LastAccessed:     time.Now(),
+		LamportTimestamp: 0,
 	}
 
 	// Store the item

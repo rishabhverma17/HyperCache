@@ -135,6 +135,11 @@ func (c *SimpleCoordinator) GetEventBus() EventBus {
 	return &simpleEventBus{coordinator: c}
 }
 
+// GetClock implements CoordinatorService.GetClock
+func (c *SimpleCoordinator) GetClock() *LamportClock {
+	return NewLamportClock() // SimpleCoordinator uses a fresh clock (not distributed)
+}
+
 // TriggerRebalance implements CoordinatorService.TriggerRebalance
 func (c *SimpleCoordinator) TriggerRebalance(ctx context.Context) error {
 	// For simple coordinator, rebalancing is automatic via hash ring

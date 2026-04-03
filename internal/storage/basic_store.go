@@ -18,15 +18,16 @@ import (
 
 // CacheItem represents a single item in the cache with true memory integration
 type CacheItem struct {
-	Key          string
-	ValuePtr     []byte // Points to actual allocated memory containing serialized value
-	ValueType    string // Type information for deserialization
-	Size         uint64 // Size of allocated memory
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	SessionID    string
-	AccessCount  uint64
-	LastAccessed time.Time
+	Key              string
+	ValuePtr         []byte // Points to actual allocated memory containing serialized value
+	ValueType        string // Type information for deserialization
+	Size             uint64 // Size of allocated memory
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	SessionID        string
+	AccessCount      uint64
+	LastAccessed     time.Time
+	LamportTimestamp uint64 // Logical clock value when this item was last written
 }
 
 // GetValue deserializes and returns the actual value from allocated memory
@@ -271,23 +272,44 @@ func NewBasicStore(config BasicStoreConfig) (*BasicStore, error) {
 
 // SetWithContext adds or updates an item in the cache with correlation context
 func (s *BasicStore) SetWithContext(ctx context.Context, key string, value interface{}, sessionID string, ttl time.Duration) error {
-	// Store the current context for logging
-	originalLoggingContext := ctx
-	defer func() {
-		// Restore context if needed
-		_ = originalLoggingContext
-	}()
-
-	return s.setWithContextInternal(ctx, key, value, sessionID, ttl)
+	return s.setWithContextInternal(ctx, key, value, sessionID, ttl, 0)
 }
 
 // Set adds or updates an item in the cache with true memory integration
 func (s *BasicStore) Set(key string, value interface{}, sessionID string, ttl time.Duration) error {
-	return s.setWithContextInternal(nil, key, value, sessionID, ttl)
+	return s.setWithContextInternal(nil, key, value, sessionID, ttl, 0)
+}
+
+// SetWithTimestamp writes a value only if the Lamport timestamp is newer than the existing one.
+// Used by the replication handler to enforce causal ordering — prevents older writes from
+// overwriting newer ones when gossip events arrive out of order.
+func (s *BasicStore) SetWithTimestamp(ctx context.Context, key string, value interface{}, sessionID string, ttl time.Duration, lamportTS uint64) (bool, error) {
+	s.mutex.RLock()
+	if existing, exists := s.items[key]; exists && existing.LamportTimestamp >= lamportTS {
+		s.mutex.RUnlock()
+		return false, nil // Existing value is newer or equal — skip
+	}
+	s.mutex.RUnlock()
+
+	err := s.setWithContextInternal(ctx, key, value, sessionID, ttl, lamportTS)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// GetTimestamp returns the Lamport timestamp for a key, or 0 if not found.
+func (s *BasicStore) GetTimestamp(key string) uint64 {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	if item, exists := s.items[key]; exists {
+		return item.LamportTimestamp
+	}
+	return 0
 }
 
 // setWithContextInternal is the internal implementation that accepts an optional context
-func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, value interface{}, sessionID string, ttl time.Duration) error {
+func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, value interface{}, sessionID string, ttl time.Duration, lamportTS uint64) error {
 	if key == "" {
 		s.incrementErrorCount()
 		return fmt.Errorf("key cannot be empty")
@@ -347,15 +369,16 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 	}
 
 	item := &CacheItem{
-		Key:          key,
-		ValuePtr:     allocatedMemory, // Points to actual allocated memory!
-		ValueType:    valueType,       // Store type for deserialization
-		Size:         size,            // Actual size of serialized data
-		CreatedAt:    time.Now(),
-		ExpiresAt:    expiresAt,
-		SessionID:    sessionID,
-		AccessCount:  0,
-		LastAccessed: time.Now(),
+		Key:              key,
+		ValuePtr:         allocatedMemory, // Points to actual allocated memory!
+		ValueType:        valueType,       // Store type for deserialization
+		Size:             size,            // Actual size of serialized data
+		CreatedAt:        time.Now(),
+		ExpiresAt:        expiresAt,
+		SessionID:        sessionID,
+		AccessCount:      0,
+		LastAccessed:     time.Now(),
+		LamportTimestamp: lamportTS,
 	}
 
 	// Store the item and track allocation
