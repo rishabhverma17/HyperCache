@@ -898,9 +898,9 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 				})
 			} else {
 				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Skipped stale replicated SET (local is newer)", map[string]interface{}{
-					"key":            key,
-					"remote_ts":      lamportTS,
-					"local_ts":       store.GetTimestamp(key),
+					"key":       key,
+					"remote_ts": lamportTS,
+					"local_ts":  store.GetTimestamp(key),
 				})
 			}
 
