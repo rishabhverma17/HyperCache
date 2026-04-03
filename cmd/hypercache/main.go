@@ -832,13 +832,10 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 			}
 
 		case "DELETE":
-			// Apply the replicated DELETE operation
-			logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Applying replicated DELETE operation", map[string]interface{}{
-				"key": key,
-			})
-
+			// Apply the replicated DELETE operation — idempotent, key may already be gone
 			if err := store.Delete(key); err != nil {
-				logging.Error(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Failed to apply replicated DELETE", err, map[string]interface{}{
+				// Key already deleted or never existed on this node — normal in eventual consistency
+				logging.Info(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Replicated DELETE (key already absent)", map[string]interface{}{
 					"key": key,
 				})
 			} else {
