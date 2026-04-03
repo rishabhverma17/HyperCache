@@ -17,6 +17,7 @@ type ClusterConfig struct {
 	BindAddress      string `yaml:"bind_address" json:"bind_address"`
 	BindPort         int    `yaml:"bind_port" json:"bind_port"`
 	AdvertiseAddress string `yaml:"advertise_address" json:"advertise_address"`
+	HTTPPort         int    `yaml:"http_port" json:"http_port"` // Shared via gossip for inter-node read-repair
 
 	// Seed nodes for bootstrap
 	SeedNodes []string `yaml:"seed_nodes" json:"seed_nodes"`
@@ -222,6 +223,9 @@ type CoordinatorService interface {
 
 	// Get the Lamport clock for causal ordering
 	GetClock() *LamportClock
+
+	// Get the HTTP address (host:port) of a node for inter-node read-repair.
+	GetNodeHTTPAddress(nodeID string) string
 
 	// Trigger rebalancing
 	TriggerRebalance(ctx context.Context) error

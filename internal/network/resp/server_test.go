@@ -23,6 +23,7 @@ func (m *mockCoordinator) GetMembership() cluster.MembershipProvider  { return n
 func (m *mockCoordinator) GetRouting() cluster.RoutingProvider        { return nil }
 func (m *mockCoordinator) GetEventBus() cluster.EventBus              { return nil }
 func (m *mockCoordinator) GetClock() *cluster.LamportClock            { return cluster.NewLamportClock() }
+func (m *mockCoordinator) GetNodeHTTPAddress(nodeID string) string    { return "" }
 func (m *mockCoordinator) TriggerRebalance(ctx context.Context) error { return nil }
 func (m *mockCoordinator) GetHealth() cluster.CoordinatorHealth       { return cluster.CoordinatorHealth{} }
 func (m *mockCoordinator) GetMetrics() cluster.CoordinatorMetrics {

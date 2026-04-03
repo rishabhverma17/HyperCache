@@ -195,6 +195,7 @@ func main() {
 			BindAddress:             cfg.Network.RESPBindAddr, // Bind to all interfaces for multi-VM
 			BindPort:                cfg.Network.GossipPort,
 			AdvertiseAddress:        cfg.Network.AdvertiseAddr, // VM-specific IP for multi-VM
+			HTTPPort:                cfg.Network.HTTPPort,      // Shared via gossip for inter-node read-repair
 			SeedNodes:               cfg.Cluster.Seeds,
 			JoinTimeout:             30, // 30 seconds
 			HeartbeatInterval:       5,  // 5 seconds
@@ -367,8 +368,30 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 		json.NewEncoder(w).Encode(response)
 	})
 
+	// Create read-repairer for cross-node GET during gossip propagation window
+	readRepairer := cluster.NewReadRepairer(coordinator)
+
+	// Internal endpoint: peer GET for read-repair (called by other nodes)
+	mux.HandleFunc("/internal/get/", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/internal/get/")
+		if key == "" {
+			http.Error(w, "Key is required", http.StatusBadRequest)
+			return
+		}
+		value, err := store.Get(key)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if b, ok := value.([]byte); ok {
+			value = string(b)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"value": value})
+	})
+
 	// Cache operations with middleware
-	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID))))
+	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID, readRepairer))))
 
 	// Cuckoo filter endpoints
 	mux.HandleFunc("/api/filter/stats", func(w http.ResponseWriter, r *http.Request) {
@@ -512,7 +535,7 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 	}
 }
 
-func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.BasicStore, nodeID string) http.HandlerFunc {
+func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.BasicStore, nodeID string, readRepairer *cluster.ReadRepairer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract key from URL path
 		path := strings.TrimPrefix(r.URL.Path, "/api/cache/")
@@ -531,10 +554,29 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				"node_id": nodeID,
 			})
 
-			// Get operation
+			// Get operation — try local store first
 			timer := logging.StartTimer(r.Context(), logging.ComponentCache, "get_operation", "Cache GET operation")
 			value, err := store.Get(key)
 			timer()
+
+			// On local miss, attempt read-repair from a peer node.
+			// This covers the gossip propagation window — the key may exist on
+			// another node but gossip hasn't delivered it here yet.
+			if err != nil && readRepairer != nil {
+				result := readRepairer.TryPeers(r.Context(), key)
+				if result != nil && result.Found {
+					value = result.Value
+					err = nil
+
+					// Store locally so subsequent GETs are fast (repair the local cache)
+					_ = store.Set(key, value, "read-repair", time.Hour)
+
+					logging.Info(r.Context(), logging.ComponentCache, "get_request", "Cache GET via read-repair", map[string]interface{}{
+						"key":         key,
+						"repair_from": result.Node,
+					})
+				}
+			}
 
 			if err != nil {
 				logging.Info(r.Context(), logging.ComponentCache, "get_request", "Cache miss", map[string]interface{}{

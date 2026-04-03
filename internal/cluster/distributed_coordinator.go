@@ -181,6 +181,19 @@ func (dc *DistributedCoordinator) GetClock() *LamportClock {
 	return dc.clock
 }
 
+// GetNodeHTTPAddress implements CoordinatorService.GetNodeHTTPAddress
+func (dc *DistributedCoordinator) GetNodeHTTPAddress(nodeID string) string {
+	member, exists := dc.membership.GetMember(nodeID)
+	if !exists {
+		return ""
+	}
+	httpPort, ok := member.Metadata["http_port"]
+	if !ok || httpPort == "" || httpPort == "0" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s", member.Address, httpPort)
+}
+
 // TriggerRebalance implements CoordinatorService.TriggerRebalance
 func (dc *DistributedCoordinator) TriggerRebalance(ctx context.Context) error {
 	// Publish rebalance event to the cluster

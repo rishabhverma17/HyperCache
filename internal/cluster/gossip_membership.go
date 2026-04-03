@@ -62,6 +62,7 @@ func NewGossipMembership(config ClusterConfig) (*GossipMembership, error) {
 			"cluster":      config.ClusterName,
 			"version":      "1.0.0",
 			"capabilities": "filters,persistence,resp",
+			"http_port":    fmt.Sprintf("%d", config.HTTPPort),
 		},
 		JoinedAt: time.Now(),
 		LastSeen: time.Now(),

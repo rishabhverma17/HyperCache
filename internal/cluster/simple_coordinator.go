@@ -140,6 +140,11 @@ func (c *SimpleCoordinator) GetClock() *LamportClock {
 	return NewLamportClock() // SimpleCoordinator uses a fresh clock (not distributed)
 }
 
+// GetNodeHTTPAddress implements CoordinatorService.GetNodeHTTPAddress
+func (c *SimpleCoordinator) GetNodeHTTPAddress(nodeID string) string {
+	return "" // SimpleCoordinator is single-node, no inter-node communication
+}
+
 // TriggerRebalance implements CoordinatorService.TriggerRebalance
 func (c *SimpleCoordinator) TriggerRebalance(ctx context.Context) error {
 	// For simple coordinator, rebalancing is automatic via hash ring
