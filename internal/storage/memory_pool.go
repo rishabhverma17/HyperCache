@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"hypercache/internal/logging"
 )
 
 // MemoryPool manages memory allocation for cache stores with pressure detection
@@ -220,21 +222,21 @@ func (mp *MemoryPool) Cleanup() {
 
 // Default pressure handlers - can be overridden by users
 func (mp *MemoryPool) defaultWarningHandler(pressure float64) {
-	// Log warning level memory pressure
-	fmt.Printf("⚠️  Memory pool '%s' at warning pressure: %.1f%%\n",
-		mp.name, pressure*100)
+	logging.Warn(nil, logging.ComponentStorage, "memory_pressure", "Memory pool at warning pressure", map[string]interface{}{
+		"pool": mp.name, "pressure_pct": pressure * 100,
+	})
 }
 
 func (mp *MemoryPool) defaultCriticalHandler(pressure float64) {
-	// Log critical level memory pressure
-	fmt.Printf("🔥 Memory pool '%s' at critical pressure: %.1f%% - aggressive cleanup needed\n",
-		mp.name, pressure*100)
+	logging.Error(nil, logging.ComponentStorage, "memory_pressure", "Memory pool at critical pressure", nil, map[string]interface{}{
+		"pool": mp.name, "pressure_pct": pressure * 100,
+	})
 }
 
 func (mp *MemoryPool) defaultPanicHandler(pressure float64) {
-	// Log panic level memory pressure
-	fmt.Printf("💥 Memory pool '%s' at panic pressure: %.1f%% - emergency eviction!\n",
-		mp.name, pressure*100)
+	logging.Fatal(nil, logging.ComponentStorage, "memory_pressure", "Memory pool at panic pressure", nil, map[string]interface{}{
+		"pool": mp.name, "pressure_pct": pressure * 100,
+	})
 }
 
 // Name returns the name of this memory pool

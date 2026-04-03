@@ -503,8 +503,6 @@ func (s *Server) handleDel(cmd Command) ([]byte, error) {
 				// Publish the event (other nodes will receive and apply it)
 				ctx := context.Background()
 				_ = eventBus.Publish(ctx, deleteEvent)
-
-				fmt.Printf("[REPLICATION] Published DELETE event for key: %s\n", key)
 			}
 		}
 		// Ignore errors for non-existent keys (Redis behavior)

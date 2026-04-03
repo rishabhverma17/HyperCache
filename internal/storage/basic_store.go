@@ -400,8 +400,7 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 		}
 		if err := s.persistEngine.WriteEntry(logEntry); err != nil {
 			// Log error but don't fail the Set operation
-			// In production, you might want to handle this more gracefully
-			fmt.Printf("Warning: failed to log SET operation: %v\n", err)
+			logging.Warn(nil, logging.ComponentStorage, logging.ActionPersist, "Failed to log SET operation", map[string]interface{}{"error": err.Error()})
 		}
 	}
 
@@ -531,7 +530,7 @@ func (s *BasicStore) Delete(key string) error {
 			Key:       key,
 		}
 		if err := s.persistEngine.WriteEntry(logEntry); err != nil {
-			fmt.Printf("Warning: failed to log DELETE operation: %v\n", err)
+			logging.Warn(nil, logging.ComponentStorage, logging.ActionPersist, "Failed to log DELETE operation", map[string]interface{}{"error": err.Error()})
 		}
 	}
 

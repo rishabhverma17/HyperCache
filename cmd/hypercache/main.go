@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -106,12 +105,14 @@ func main() {
 		}
 	}
 
-	fmt.Printf("🚀 Starting HyperCache Node: %s\n", cfg.Node.ID)
-	fmt.Printf("📡 Protocol: %s\n", *protocol)
-	fmt.Printf("📡 RESP API: %s:%d\n", cfg.Network.RESPBindAddr, cfg.Network.RESPPort)
-	fmt.Printf("📡 HTTP API: %s:%d\n", cfg.Network.HTTPBindAddr, cfg.Network.HTTPPort)
-	fmt.Printf("📡 Gossip: %s:%d\n", cfg.Network.AdvertiseAddr, cfg.Network.GossipPort)
-	fmt.Printf("💾 Data directory: %s\n", cfg.Node.DataDir)
+	logging.Info(ctx, logging.ComponentMain, logging.ActionStart, "Starting HyperCache Node", map[string]interface{}{
+		"node_id":     cfg.Node.ID,
+		"protocol":    *protocol,
+		"resp_addr":   fmt.Sprintf("%s:%d", cfg.Network.RESPBindAddr, cfg.Network.RESPPort),
+		"http_addr":   fmt.Sprintf("%s:%d", cfg.Network.HTTPBindAddr, cfg.Network.HTTPPort),
+		"gossip_addr": fmt.Sprintf("%s:%d", cfg.Network.AdvertiseAddr, cfg.Network.GossipPort),
+		"data_dir":    cfg.Node.DataDir,
+	})
 
 	// Log configuration details
 	logging.Info(ctx, logging.ComponentMain, logging.ActionStart, "Node configuration loaded", map[string]interface{}{
@@ -175,15 +176,16 @@ func main() {
 
 		store, err := storage.NewBasicStore(storeConfig)
 		if err != nil {
-			log.Fatalf("Failed to create storage: %v", err)
+			logging.Fatal(ctx, logging.ComponentMain, logging.ActionStart, "Failed to create storage", err)
+			os.Exit(1)
 		}
 		defer store.Close()
 
 		// Start persistence
 		if err := store.StartPersistence(shutdownCtx); err != nil {
-			log.Printf("Warning: Failed to start persistence: %v", err)
+			logging.Warn(ctx, logging.ComponentPersistence, logging.ActionStart, "Failed to start persistence", map[string]interface{}{"error": err.Error()})
 		} else {
-			log.Printf("✅ Persistence enabled and started: %s", cfg.Node.DataDir)
+			logging.Info(ctx, logging.ComponentPersistence, logging.ActionStart, "Persistence enabled and started", map[string]interface{}{"data_dir": cfg.Node.DataDir})
 		}
 
 		// Create distributed coordinator with configuration-driven clustering
@@ -201,7 +203,8 @@ func main() {
 
 		coord, err := cluster.NewDistributedCoordinator(clusterConfig)
 		if err != nil {
-			log.Fatalf("Failed to create distributed coordinator: %v", err)
+			logging.Fatal(ctx, logging.ComponentMain, logging.ActionStart, "Failed to create distributed coordinator", err)
+			os.Exit(1)
 		}
 		defer func() {
 			// DistributedCoordinator doesn't have Close(), stop via context
@@ -209,7 +212,8 @@ func main() {
 
 		// Start coordinator (this handles clustering, replication, and gossip)
 		if err := coord.Start(shutdownCtx); err != nil {
-			log.Fatalf("Failed to start coordinator: %v", err)
+			logging.Fatal(ctx, logging.ComponentMain, logging.ActionStart, "Failed to start coordinator", err)
+			os.Exit(1)
 		}
 
 		// Subscribe to replication events
@@ -235,7 +239,7 @@ func main() {
 				}
 			}()
 		} else {
-			log.Printf("Warning: Event bus not available - replication disabled")
+			logging.Warn(ctx, logging.ComponentEventBus, logging.ActionStart, "Event bus not available - replication disabled")
 		}
 
 		// Create distributed-aware RESP server using configured address
@@ -244,22 +248,22 @@ func main() {
 
 		// Start RESP server
 		go func() {
-			fmt.Printf("🌐 RESP server listening on %s (Redis-compatible)\n", respBindAddr)
+			logging.Info(ctx, logging.ComponentRESP, logging.ActionStart, "RESP server listening", map[string]interface{}{"bind_addr": respBindAddr})
 
 			if err := respServer.Start(); err != nil {
-				log.Printf("RESP server error: %v", err)
+				logging.Error(ctx, logging.ComponentRESP, logging.ActionStart, "RESP server error", err, nil)
 			}
 		}()
 
 		// Start HTTP API server alongside RESP using configured port
 		go func() {
 			if err := startHTTPServer(shutdownCtx, coord, store, cfg.Network.HTTPPort, cfg.Node.ID); err != nil {
-				log.Printf("HTTP API server error: %v", err)
+				logging.Error(ctx, logging.ComponentHTTP, logging.ActionStart, "HTTP API server error", err, nil)
 			}
 		}()
 	} else {
 		// Internal protocol mode (future implementation)
-		fmt.Printf("🌐 HyperCache running in standalone mode (internal protocol)\n")
+		logging.Info(ctx, logging.ComponentMain, logging.ActionStart, "HyperCache running in standalone mode")
 	}
 
 	// Wait for interrupt signal for graceful shutdown
@@ -267,12 +271,12 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	<-c
-	fmt.Printf("\n🛑 Shutting down HyperCache node: %s\n", cfg.Node.ID)
+	logging.Info(ctx, logging.ComponentMain, logging.ActionStop, "Shutting down HyperCache node", map[string]interface{}{"node_id": cfg.Node.ID})
 
 	// Cancel context to stop server
 	cancel()
 
-	fmt.Println("✅ HyperCache shutdown complete")
+	logging.Info(ctx, logging.ComponentMain, logging.ActionStop, "HyperCache shutdown complete")
 }
 
 // Helper function to parse size strings (e.g., "100MB") into int64 bytes
@@ -294,13 +298,13 @@ func parseSize(sizeStr string) int64 {
 
 	n, err := fmt.Sscanf(sizeStr, "%d%s", &size, &unit)
 	if err != nil || n != 2 {
-		fmt.Printf("Warning: invalid size format '%s', defaulting to 0\n", sizeStr)
+		logging.Warn(nil, logging.ComponentConfig, logging.ActionValidation, "Invalid size format, defaulting to 0", map[string]interface{}{"input": sizeStr})
 		return 0
 	}
 
 	multiplier, exists := multipliers[unit]
 	if !exists {
-		fmt.Printf("Warning: unknown unit '%s' in size '%s', defaulting to bytes\n", unit, sizeStr)
+		logging.Warn(nil, logging.ComponentConfig, logging.ActionValidation, "Unknown unit in size, defaulting to bytes", map[string]interface{}{"unit": unit, "input": sizeStr})
 		multiplier = 1
 	}
 
@@ -320,7 +324,7 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 			r = r.WithContext(logging.WithCorrelationID(r.Context(), correlationID))
 		}
 
-		logging.Info(r.Context(), logging.ComponentHTTP, "health_check", "Health check requested")
+		logging.Debug(r.Context(), logging.ComponentHTTP, "health_check", "Health check requested")
 
 		health := coordinator.GetHealth()
 		response := map[string]interface{}{
@@ -474,7 +478,6 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 		"port":    port,
 		"node_id": nodeID,
 	})
-	fmt.Printf("🌐 HTTP API server starting on port %d for node %s\n", port, nodeID)
 
 	// Start server in goroutine
 	serverErr := make(chan error, 1)
@@ -492,15 +495,15 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 		if err != nil {
 			return err
 		}
-		fmt.Printf("✅ HTTP API server started successfully on port %d for node %s\n", port, nodeID)
+		logging.Info(ctx, logging.ComponentHTTP, logging.ActionStart, "HTTP API server started", map[string]interface{}{"port": port, "node_id": nodeID})
 	case <-time.After(100 * time.Millisecond):
-		fmt.Printf("✅ HTTP API server started successfully on port %d for node %s\n", port, nodeID)
+		logging.Info(ctx, logging.ComponentHTTP, logging.ActionStart, "HTTP API server started", map[string]interface{}{"port": port, "node_id": nodeID})
 	}
 
 	// Wait for context cancellation
 	select {
 	case <-ctx.Done():
-		fmt.Printf("🛑 HTTP API server shutting down for node %s\n", nodeID)
+		logging.Info(ctx, logging.ComponentHTTP, logging.ActionStop, "HTTP API server shutting down", map[string]interface{}{"node_id": nodeID})
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
@@ -534,9 +537,8 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 			timer()
 
 			if err != nil {
-				logging.Warn(r.Context(), logging.ComponentCache, "get_request", "Cache GET operation failed - key not found", map[string]interface{}{
-					"key":   key,
-					"error": err.Error(),
+				logging.Info(r.Context(), logging.ComponentCache, "get_request", "Cache miss", map[string]interface{}{
+					"key": key,
 				})
 
 				w.WriteHeader(http.StatusNotFound)
@@ -730,7 +732,7 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 						"operation": "DELETE",
 					})
 				}
-			} else {
+			} else if existed {
 				logging.Warn(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "Event bus not available - no replication", map[string]interface{}{
 					"key":       key,
 					"operation": "DELETE",
@@ -766,6 +768,11 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 
 // handleReplicationEvent processes incoming replication events from other nodes
 func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, store *storage.BasicStore, nodeID string) {
+	// Skip events from ourselves — no need to log, the originating request already has full tracing
+	if event.NodeID == nodeID {
+		return
+	}
+
 	// Create context with correlation ID from the event
 	correlationCtx := logging.WithCorrelationID(ctx, event.CorrelationID)
 
@@ -775,11 +782,6 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 		"target_node":    nodeID,
 		"correlation_id": event.CorrelationID,
 	})
-
-	// Skip events from ourselves
-	if event.NodeID == nodeID {
-		return
-	}
 
 	// Process data operation events
 	if event.Type == cluster.EventDataOperation {

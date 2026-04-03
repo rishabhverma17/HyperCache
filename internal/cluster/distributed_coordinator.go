@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"hypercache/internal/logging"
 )
 
 // DistributedCoordinator provides a full implementation of CoordinatorService
@@ -95,7 +97,7 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 	// Join cluster if seed nodes are provided
 	if len(dc.config.SeedNodes) > 0 {
 		if err := dc.membership.Join(ctx, dc.config.SeedNodes); err != nil {
-			fmt.Printf("Warning: failed to join cluster: %v\n", err)
+			logging.Warn(nil, logging.ComponentCoordinator, logging.ActionJoin, "Failed to join cluster", map[string]interface{}{"error": err.Error()})
 			// Don't fail startup - we can operate as a single node
 		}
 	}
@@ -115,7 +117,7 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 	}
 	_ = dc.eventBus.Publish(ctx, startupEvent)
 
-	fmt.Printf("Distributed coordinator started: %s\n", dc.localNodeID)
+	logging.Info(nil, logging.ComponentCoordinator, logging.ActionStart, "Distributed coordinator started", map[string]interface{}{"node_id": dc.localNodeID})
 
 	return nil
 }
@@ -147,7 +149,7 @@ func (dc *DistributedCoordinator) Stop(ctx context.Context) error {
 	// Remove local node from hash ring
 	_ = dc.hashRing.RemoveNode(dc.localNodeID)
 
-	fmt.Printf("Distributed coordinator stopped: %s\n", dc.localNodeID)
+	logging.Info(nil, logging.ComponentCoordinator, logging.ActionStop, "Distributed coordinator stopped", map[string]interface{}{"node_id": dc.localNodeID})
 
 	return nil
 }
@@ -260,11 +262,11 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 		// Add node to hash ring
 		err := dc.hashRing.AddNode(member.NodeID, member.Address, member.Port)
 		if err != nil {
-			fmt.Printf("Failed to add node to hash ring: %s - %v\n", member.NodeID, err)
+			logging.Error(nil, logging.ComponentCoordinator, "hash_ring", "Failed to add node to hash ring", err, map[string]interface{}{"node_id": member.NodeID})
 			return
 		}
 
-		fmt.Printf("Added node to hash ring: %s (%s:%d)\n", member.NodeID, member.Address, member.Port)
+		logging.Info(nil, logging.ComponentCoordinator, "hash_ring", "Added node to hash ring", map[string]interface{}{"node_id": member.NodeID, "address": member.Address, "port": member.Port})
 
 		// Publish topology change event
 		topologyEvent := ClusterEvent{
@@ -279,11 +281,11 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 		// Remove node from hash ring
 		err := dc.hashRing.RemoveNode(member.NodeID)
 		if err != nil {
-			fmt.Printf("Failed to remove node from hash ring: %s - %v\n", member.NodeID, err)
+			logging.Error(nil, logging.ComponentCoordinator, "hash_ring", "Failed to remove node from hash ring", err, map[string]interface{}{"node_id": member.NodeID})
 			return
 		}
 
-		fmt.Printf("Removed node from hash ring: %s\n", member.NodeID)
+		logging.Info(nil, logging.ComponentCoordinator, "hash_ring", "Removed node from hash ring", map[string]interface{}{"node_id": member.NodeID})
 
 		// Publish topology change event
 		topologyEvent := ClusterEvent{
@@ -298,15 +300,15 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 		// Update node status in hash ring
 		err := dc.hashRing.SetNodeStatus(member.NodeID, NodeAlive)
 		if err != nil {
-			fmt.Printf("Failed to update node status: %s - %v\n", member.NodeID, err)
+			logging.Error(nil, logging.ComponentCoordinator, "hash_ring", "Failed to update node status", err, map[string]interface{}{"node_id": member.NodeID})
 			return
 		}
 
-		fmt.Printf("Node recovered: %s\n", member.NodeID)
+		logging.Info(nil, logging.ComponentCoordinator, "hash_ring", "Node recovered", map[string]interface{}{"node_id": member.NodeID})
 
 	case MemberUpdated:
 		// Node metadata updated - no hash ring changes needed
-		fmt.Printf("Node metadata updated: %s\n", member.NodeID)
+		logging.Debug(nil, logging.ComponentCoordinator, "hash_ring", "Node metadata updated", map[string]interface{}{"node_id": member.NodeID})
 	}
 }
 

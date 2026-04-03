@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"hypercache/internal/logging"
 )
 
 // PersistenceEngine handles data persistence operations
@@ -136,7 +138,7 @@ func (he *HybridEngine) Start(ctx context.Context) error {
 		if err := he.aofManager.Open(); err != nil {
 			return fmt.Errorf("failed to initialize AOF: %w", err)
 		}
-		fmt.Printf("AOF initialized: %s\n", he.config.DataDirectory)
+		logging.Info(nil, logging.ComponentPersistence, logging.ActionStart, "AOF initialized", map[string]interface{}{"data_dir": he.config.DataDirectory})
 	}
 
 	he.running = true
@@ -153,8 +155,10 @@ func (he *HybridEngine) Start(ctx context.Context) error {
 		go he.compactionWorker()
 	}
 
-	fmt.Printf("Persistence engine started (AOF: %v, Snapshots: %v)\n",
-		he.config.EnableAOF, he.config.SnapshotInterval > 0)
+	logging.Info(nil, logging.ComponentPersistence, logging.ActionStart, "Persistence engine started", map[string]interface{}{
+		"aof_enabled":       he.config.EnableAOF,
+		"snapshots_enabled": he.config.SnapshotInterval > 0,
+	})
 
 	return nil
 }
@@ -179,12 +183,12 @@ func (he *HybridEngine) Stop() error {
 	// Close AOF
 	if he.aofManager != nil {
 		if err := he.aofManager.Close(); err != nil {
-			fmt.Printf("Warning: failed to close AOF: %v\n", err)
+			logging.Warn(nil, logging.ComponentPersistence, logging.ActionStop, "Failed to close AOF", map[string]interface{}{"error": err.Error()})
 		}
 	}
 
 	he.running = false
-	fmt.Printf("Persistence engine stopped\n")
+	logging.Info(nil, logging.ComponentPersistence, logging.ActionStop, "Persistence engine stopped")
 
 	return nil
 }
@@ -255,8 +259,10 @@ func (he *HybridEngine) ReadEntries() ([]*LogEntry, error) {
 		}
 
 		if header != nil {
-			fmt.Printf("Loaded snapshot: %d entries from %v\n",
-				header.EntryCount, header.CreatedAt.Format("2006-01-02 15:04:05"))
+			logging.Info(nil, logging.ComponentPersistence, logging.ActionRestore, "Loaded snapshot", map[string]interface{}{
+				"entry_count": header.EntryCount,
+				"created_at":  header.CreatedAt.Format("2006-01-02 15:04:05"),
+			})
 
 			// Convert snapshot data to log entries
 			for key, value := range data {
@@ -314,8 +320,7 @@ func (he *HybridEngine) snapshotWorker() {
 			return
 		case <-ticker.C:
 			// This will be called from the main cache when data is available
-			// For now, just log that the worker is running
-			fmt.Printf("Snapshot worker tick (waiting for cache integration)\n")
+			logging.Debug(nil, logging.ComponentPersistence, logging.ActionSnapshot, "Snapshot worker tick")
 		}
 	}
 }
@@ -333,7 +338,7 @@ func (he *HybridEngine) compactionWorker() {
 			return
 		case <-ticker.C:
 			if he.shouldCompact() {
-				fmt.Printf("AOF compaction needed (waiting for cache integration)\n")
+				logging.Debug(nil, logging.ComponentPersistence, logging.ActionCompaction, "AOF compaction needed")
 				// This will be implemented when integrated with cache
 			}
 		}

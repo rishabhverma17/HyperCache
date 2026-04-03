@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"hypercache/internal/cache"
+	"hypercache/internal/logging"
 )
 
 // StartPersistence initializes and starts the persistence engine
@@ -50,7 +51,7 @@ func (s *BasicStore) CreateSnapshot() error {
 		// For simplicity, convert back to original value
 		value, err := item.GetValue()
 		if err != nil {
-			fmt.Printf("Warning: failed to get value for key %s during snapshot: %v\n", key, err)
+			logging.Warn(nil, logging.ComponentStorage, logging.ActionSnapshot, "Failed to get value for key during snapshot", map[string]interface{}{"key": key, "error": err.Error()})
 			continue
 		}
 		data[key] = value
@@ -80,11 +81,11 @@ func (s *BasicStore) recoverFromPersistence() error {
 	}
 
 	if len(entries) == 0 {
-		fmt.Printf("No persistence entries to recover\n")
+		logging.Info(nil, logging.ComponentStorage, logging.ActionRestore, "No persistence entries to recover")
 		return nil
 	}
 
-	fmt.Printf("Recovering %d entries from persistence...\n", len(entries))
+	logging.Info(nil, logging.ComponentStorage, logging.ActionRestore, "Recovering entries from persistence", map[string]interface{}{"entry_count": len(entries)})
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -113,7 +114,7 @@ func (s *BasicStore) recoverFromPersistence() error {
 
 			// Use internal set without persistence logging to avoid recursion
 			if err := s.setInternal(entry.Key, value, entry.SessionID, ttl); err != nil {
-				fmt.Printf("Warning: failed to recover SET %s: %v\n", entry.Key, err)
+				logging.Warn(nil, logging.ComponentStorage, logging.ActionRestore, "Failed to recover SET", map[string]interface{}{"key": entry.Key, "error": err.Error()})
 				errorCount++
 				continue
 			}
@@ -123,7 +124,7 @@ func (s *BasicStore) recoverFromPersistence() error {
 			// Delete the key if it exists
 			if _, exists := s.items[entry.Key]; exists {
 				if err := s.deleteInternal(entry.Key); err != nil {
-					fmt.Printf("Warning: failed to recover DEL %s: %v\n", entry.Key, err)
+					logging.Warn(nil, logging.ComponentStorage, logging.ActionRestore, "Failed to recover DEL", map[string]interface{}{"key": entry.Key, "error": err.Error()})
 					errorCount++
 					continue
 				}
@@ -137,7 +138,7 @@ func (s *BasicStore) recoverFromPersistence() error {
 		}
 	}
 
-	fmt.Printf("Recovery complete: %d entries recovered, %d errors\n", recoveredCount, errorCount)
+	logging.Info(nil, logging.ComponentStorage, logging.ActionRestore, "Recovery complete", map[string]interface{}{"recovered": recoveredCount, "errors": errorCount})
 	return nil
 }
 

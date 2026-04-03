@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"hypercache/internal/logging"
 )
 
 // SnapshotManager handles snapshot creation and loading
@@ -130,11 +132,14 @@ func (sm *SnapshotManager) CreateSnapshot(ctx context.Context, data map[string]i
 	// Clean up old snapshots
 	if err := sm.cleanupOldSnapshots(); err != nil {
 		// Log error but don't fail the snapshot creation
-		fmt.Printf("Warning: failed to cleanup old snapshots: %v\n", err)
+		logging.Warn(nil, logging.ComponentPersistence, logging.ActionCleanup, "Failed to cleanup old snapshots", map[string]interface{}{"error": err.Error()})
 	}
 
-	fmt.Printf("Snapshot created: %s (%d entries in %v)\n",
-		filename, entriesWritten, time.Since(start))
+	logging.Info(nil, logging.ComponentPersistence, logging.ActionSnapshot, "Snapshot created", map[string]interface{}{
+		"filename": filename,
+		"entries":  entriesWritten,
+		"duration": time.Since(start).String(),
+	})
 
 	return nil
 }
@@ -210,8 +215,11 @@ func (sm *SnapshotManager) LoadSnapshot(ctx context.Context) (map[string]interfa
 		entriesLoaded++
 	}
 
-	fmt.Printf("Snapshot loaded: %s (%d entries in %v)\n",
-		snapshotFile, entriesLoaded, time.Since(start))
+	logging.Info(nil, logging.ComponentPersistence, logging.ActionRestore, "Snapshot loaded", map[string]interface{}{
+		"file":     snapshotFile,
+		"entries":  entriesLoaded,
+		"duration": time.Since(start).String(),
+	})
 
 	return data, &header, nil
 }
@@ -330,7 +338,7 @@ func (sm *SnapshotManager) cleanupOldSnapshots() error {
 	toRemove := len(fileInfos) - sm.config.RetainLogs
 	for i := 0; i < toRemove; i++ {
 		if err := os.Remove(fileInfos[i].path); err != nil {
-			fmt.Printf("Warning: failed to remove old snapshot %s: %v\n", fileInfos[i].path, err)
+			logging.Warn(nil, logging.ComponentPersistence, logging.ActionCleanup, "Failed to remove old snapshot", map[string]interface{}{"path": fileInfos[i].path, "error": err.Error()})
 		}
 	}
 

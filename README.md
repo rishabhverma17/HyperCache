@@ -342,6 +342,68 @@ docker stats hypercache-elasticsearch hypercache-grafana
 tar -czf hypercache-backup-$(date +%Y%m%d).tar.gz data/
 ```
 
+### **Logging & Log Levels**
+
+HyperCache uses structured JSON logging with correlation IDs for full request tracing across all cluster nodes.
+
+**Available log levels** (from most to least verbose):
+
+| Level | What it includes |
+|-------|-----------------|
+| `debug` | Everything: cuckoo filter decisions, event bus routing, gossip internals, health checks, snapshot ticks |
+| `info` | Business operations: request lifecycle (start → operation → result), replication flow, cluster membership changes, persistence events |
+| `warn` | Potential issues: memory pressure warnings, failed joins, missing event bus |
+| `error` | Failures: replication errors, deserialization failures, storage errors |
+| `fatal` | Unrecoverable: startup failures |
+
+**Changing the log level:**
+
+Edit the node config YAML (e.g., `configs/docker/node1-config.yaml`):
+
+```yaml
+logging:
+  level: "info"     # Change to "debug" for troubleshooting, "warn" for quieter logs
+  max_file_size: "100MB"
+  max_files: 5
+  output: ["console", "file"]
+  structured: true
+  log_dir: "/app/logs"
+```
+
+For Docker deployments, update all three node configs and rebuild:
+
+```bash
+# Edit configs/docker/node1-config.yaml, node2-config.yaml, node3-config.yaml
+# Then rebuild and redeploy:
+docker compose -f docker-compose.cluster.yml up -d --build
+```
+
+**Request tracing with correlation IDs:**
+
+Every request gets a `correlation_id` that flows through the entire lifecycle — from HTTP entry through cache operations to cross-node replication. Use it to trace any request across all nodes:
+
+```bash
+# Trace a specific request across all nodes
+docker logs hypercache-node1 2>&1 | grep "abc-123-correlation-id"
+docker logs hypercache-node2 2>&1 | grep "abc-123-correlation-id"
+docker logs hypercache-node3 2>&1 | grep "abc-123-correlation-id"
+
+# Find all errors in the last hour
+docker logs --since 1h hypercache-node1 2>&1 | grep '"level":"ERROR"'
+
+# Find all replication events
+docker logs hypercache-node1 2>&1 | grep '"action":"replication"'
+```
+
+You can also pass your own correlation ID via the `X-Correlation-ID` HTTP header for end-to-end tracing from your application:
+
+```bash
+curl -X PUT http://localhost:9080/api/cache/mykey \
+  -H "Content-Type: application/json" \
+  -H "X-Correlation-ID: my-trace-id-123" \
+  -d '{"value": "hello"}'
+```
+
 ## 📖 **Documentation**
 
 See [docs/README.md](docs/README.md) for the full documentation index:

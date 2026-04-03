@@ -3,10 +3,14 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"strconv"
 	"sync"
 	"time"
+
+	"hypercache/internal/logging"
 
 	"github.com/hashicorp/serf/serf"
 )
@@ -89,6 +93,12 @@ func (gm *GossipMembership) Start(ctx context.Context) error {
 	// Configure gossip intervals
 	conf.MemberlistConfig.GossipInterval = time.Duration(gm.config.HeartbeatInterval) * time.Second
 
+	// Silence memberlist/serf internal debug logs — they bypass structured logging
+	// and flood stdout with unstructured [DEBUG] memberlist: lines
+	silentLogger := log.New(io.Discard, "", 0)
+	conf.Logger = silentLogger
+	conf.MemberlistConfig.Logger = silentLogger
+
 	// Set tags (metadata)
 	conf.Tags = gm.localMember.Metadata
 
@@ -118,7 +128,7 @@ func (gm *GossipMembership) Stop(ctx context.Context) error {
 		err := gm.serf.Leave()
 		if err != nil {
 			// Log error but continue shutdown
-			fmt.Printf("Error leaving serf cluster: %v\n", err)
+			logging.Warn(nil, logging.ComponentGossip, logging.ActionLeave, "Error leaving serf cluster", map[string]interface{}{"error": err.Error()})
 		}
 
 		// Shutdown serf
@@ -164,7 +174,7 @@ func (gm *GossipMembership) Join(ctx context.Context, seedNodes []string) error 
 		}
 
 		// Try to join this seed node
-		fmt.Printf("Attempting to join cluster via %s...\n", seedAddr)
+		logging.Info(nil, logging.ComponentGossip, logging.ActionJoin, "Attempting to join cluster", map[string]interface{}{"seed_addr": seedAddr})
 		num, err := gm.serf.Join([]string{seedAddr}, false)
 		if err != nil {
 			lastErr = err
@@ -172,7 +182,7 @@ func (gm *GossipMembership) Join(ctx context.Context, seedNodes []string) error 
 		}
 
 		if num > 0 {
-			fmt.Printf("Successfully joined cluster via %s (%d members)\n", seedAddr, num)
+			logging.Info(nil, logging.ComponentGossip, logging.ActionJoin, "Successfully joined cluster", map[string]interface{}{"seed_addr": seedAddr, "members": num})
 			return nil
 		}
 	}
@@ -323,7 +333,7 @@ func (gm *GossipMembership) handleSerfEvent(event serf.Event) {
 	case *serf.Query:
 		gm.handleQuery(e)
 	default:
-		fmt.Printf("Unknown serf event type: %T\n", event)
+		logging.Warn(nil, logging.ComponentGossip, "unknown_event", "Unknown serf event type", map[string]interface{}{"type": fmt.Sprintf("%T", event)})
 	}
 }
 
@@ -359,7 +369,7 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 		gm.members[clusterMember.NodeID] = clusterMember
 		gm.mu.Unlock()
 
-		fmt.Printf("Node joined: %s (%s:%d)\n", clusterMember.NodeID, clusterMember.Address, clusterMember.Port)
+		logging.Info(nil, logging.ComponentGossip, logging.ActionJoin, "Node joined", map[string]interface{}{"node_id": clusterMember.NodeID, "address": clusterMember.Address, "port": clusterMember.Port})
 
 	case serf.EventMemberLeave:
 		clusterMember.Status = NodeLeaving
@@ -370,7 +380,7 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 		delete(gm.members, clusterMember.NodeID)
 		gm.mu.Unlock()
 
-		fmt.Printf("Node left: %s\n", clusterMember.NodeID)
+		logging.Info(nil, logging.ComponentGossip, logging.ActionLeave, "Node left", map[string]interface{}{"node_id": clusterMember.NodeID})
 
 	case serf.EventMemberFailed:
 		clusterMember.Status = NodeDead
@@ -384,7 +394,7 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 		}
 		gm.mu.Unlock()
 
-		fmt.Printf("Node failed: %s\n", clusterMember.NodeID)
+		logging.Warn(nil, logging.ComponentGossip, "node_failed", "Node failed", map[string]interface{}{"node_id": clusterMember.NodeID})
 
 	case serf.EventMemberUpdate:
 		clusterMember.Status = NodeAlive
@@ -398,7 +408,7 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 		}
 		gm.mu.Unlock()
 
-		fmt.Printf("Node updated: %s\n", clusterMember.NodeID)
+		logging.Debug(nil, logging.ComponentGossip, "node_updated", "Node updated", map[string]interface{}{"node_id": clusterMember.NodeID})
 
 	case serf.EventMemberReap:
 		// Member reaped (removed from failed state)
@@ -406,11 +416,11 @@ func (gm *GossipMembership) processMemberChange(serfMember serf.Member, eventTyp
 		delete(gm.members, clusterMember.NodeID)
 		gm.mu.Unlock()
 
-		fmt.Printf("Node reaped: %s\n", clusterMember.NodeID)
+		logging.Info(nil, logging.ComponentGossip, "node_reaped", "Node reaped", map[string]interface{}{"node_id": clusterMember.NodeID})
 		return // Don't send event for reaping
 
 	default:
-		fmt.Printf("Unknown member event type: %s\n", eventType)
+		logging.Warn(nil, logging.ComponentGossip, "unknown_event", "Unknown member event type", map[string]interface{}{"event_type": fmt.Sprintf("%v", eventType)})
 		return
 	}
 
@@ -435,14 +445,14 @@ func (gm *GossipMembership) notifySubscribers(event MembershipEvent) {
 		case ch <- event:
 		default:
 			// Channel is full, skip this subscriber
-			fmt.Printf("Warning: membership event channel full for subscriber\n")
+			logging.Warn(nil, logging.ComponentGossip, "channel_full", "Membership event channel full for subscriber")
 		}
 	}
 }
 
 // handleUserEvent processes custom user events
 func (gm *GossipMembership) handleUserEvent(event serf.UserEvent) {
-	fmt.Printf("[GOSSIP] User event received: %s (payload: %s)\n", event.Name, string(event.Payload))
+	logging.Debug(nil, logging.ComponentGossip, "user_event", "User event received", map[string]interface{}{"event_name": event.Name})
 
 	// Forward to registered handler if available
 	if gm.userEventHandler != nil {
@@ -452,7 +462,7 @@ func (gm *GossipMembership) handleUserEvent(event serf.UserEvent) {
 
 // handleQuery processes queries from other nodes
 func (gm *GossipMembership) handleQuery(query *serf.Query) {
-	fmt.Printf("Query received: %s (payload: %s)\n", query.Name, string(query.Payload))
+	logging.Debug(nil, logging.ComponentGossip, "query_received", "Query received", map[string]interface{}{"query_name": query.Name})
 	// Queries can be used for cluster-wide operations
 
 	// Example: health check query

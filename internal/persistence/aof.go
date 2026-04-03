@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"hypercache/internal/logging"
 	"time"
 )
 
@@ -240,7 +242,7 @@ func (aof *AOFManager) Replay(ctx context.Context) ([]LogEntry, error) {
 
 		// Progress feedback for large logs
 		if lineNum%10000 == 0 {
-			fmt.Printf("AOF replay progress: %d entries processed\n", lineNum)
+			logging.Info(nil, logging.ComponentPersistence, logging.ActionRestore, "AOF replay progress", map[string]interface{}{"entries_processed": lineNum})
 		}
 	}
 
@@ -248,7 +250,7 @@ func (aof *AOFManager) Replay(ctx context.Context) ([]LogEntry, error) {
 		return nil, fmt.Errorf("error reading AOF: %w", err)
 	}
 
-	fmt.Printf("AOF replay completed: %d entries in %v\n", len(entries), time.Since(start))
+	logging.Info(nil, logging.ComponentPersistence, logging.ActionRestore, "AOF replay completed", map[string]interface{}{"entries": len(entries), "duration": time.Since(start).String()})
 
 	return entries, nil
 }
@@ -374,8 +376,10 @@ func (aof *AOFManager) Compact(ctx context.Context, currentData map[string]inter
 
 	aof.stats.CompactionRuns++
 
-	fmt.Printf("AOF compaction completed: %d entries written in %v\n",
-		entriesWritten, time.Since(start))
+	logging.Info(nil, logging.ComponentPersistence, logging.ActionCompaction, "AOF compaction completed", map[string]interface{}{
+		"entries_written": entriesWritten,
+		"duration":        time.Since(start).String(),
+	})
 
 	return nil
 }

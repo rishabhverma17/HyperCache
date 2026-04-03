@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hypercache/internal/logging"
 )
 
 // DistributedEventBus implements EventBus using gossip for cluster-wide events
@@ -160,8 +162,6 @@ func (deb *DistributedEventBus) deliverLocalEvent(event ClusterEvent) {
 	deb.subsMu.RLock()
 	defer deb.subsMu.RUnlock()
 
-	fmt.Printf("[EVENT_BUS] Delivering local event to %d subscribers\n", len(deb.subscribers))
-
 	for ch, eventTypes := range deb.subscribers {
 		// Check if subscriber is interested in this event type
 		interested := false
@@ -172,15 +172,12 @@ func (deb *DistributedEventBus) deliverLocalEvent(event ClusterEvent) {
 			}
 		}
 
-		fmt.Printf("[EVENT_BUS] Subscriber interested in %v, event type: %s, interested: %t\n", eventTypes, event.Type, interested)
-
 		if interested {
 			select {
 			case ch <- event:
-				fmt.Printf("[EVENT_BUS] Event delivered to subscriber\n")
 			default:
 				// Channel is full, skip this subscriber
-				fmt.Printf("[EVENT_BUS] Warning: event channel full for subscriber\n")
+				logging.Warn(nil, logging.ComponentEventBus, "channel_full", "Event channel full for subscriber")
 			}
 		}
 	}
@@ -215,27 +212,20 @@ func (deb *DistributedEventBus) listenForGossipEvents(ctx context.Context) {
 
 // processIncomingGossipEvent handles incoming gossip events from other nodes
 func (deb *DistributedEventBus) processIncomingGossipEvent(eventName string, payload []byte) {
-	fmt.Printf("[EVENT_BUS] Processing gossip event: %s (payload: %s)\n", eventName, string(payload))
-
 	// Parse the event type from the gossip event name
 	if !strings.HasPrefix(eventName, "cluster-event:") {
-		fmt.Printf("[EVENT_BUS] Ignoring non-cluster event: %s\n", eventName)
 		return // Not a cluster event
 	}
 
 	// Deserialize the event
 	var event ClusterEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		fmt.Printf("[EVENT_BUS] Failed to deserialize cluster event: %v\n", err)
+		logging.Error(nil, logging.ComponentEventBus, "deserialize", "Failed to deserialize cluster event", err, nil)
 		return
 	}
 
-	fmt.Printf("[EVENT_BUS] Deserialized event: Type=%s, NodeID=%s, CorrelationID=%s, Data=%v\n",
-		event.Type, event.NodeID, event.CorrelationID, event.Data)
-
 	// Skip events from ourselves to avoid loops
 	if event.NodeID == deb.nodeID {
-		fmt.Printf("[EVENT_BUS] Skipping own event from node %s\n", event.NodeID)
 		return
 	}
 
@@ -244,7 +234,11 @@ func (deb *DistributedEventBus) processIncomingGossipEvent(eventName string, pay
 	deb.eventsReceived++
 	deb.metricsMu.Unlock()
 
-	fmt.Printf("[EVENT_BUS] Delivering event to local subscribers (preserving correlation ID: %s)\n", event.CorrelationID)
+	logging.Debug(nil, logging.ComponentEventBus, logging.ActionReplication, "Delivering remote event to local subscribers", map[string]interface{}{
+		"event_type":     string(event.Type),
+		"source_node":    event.NodeID,
+		"correlation_id": event.CorrelationID,
+	})
 
 	// Deliver to local subscribers (correlation ID is already preserved in the event)
 	deb.deliverLocalEvent(event)
@@ -269,7 +263,7 @@ func (deb *DistributedEventBus) QueryCluster(queryName string, data interface{},
 	for _, response := range responses {
 		var result interface{}
 		if err := json.Unmarshal(response, &result); err != nil {
-			fmt.Printf("Failed to deserialize query response: %v\n", err)
+			logging.Warn(nil, logging.ComponentEventBus, "deserialize", "Failed to deserialize query response", map[string]interface{}{"error": err.Error()})
 			continue
 		}
 		results = append(results, result)
