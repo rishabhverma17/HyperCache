@@ -57,9 +57,7 @@ scripts/
 test-results/
 benchmark-results/
 
-# Monitoring and config files we don't need in container
-grafana/
-filebeat*.yml
+# Compose files (not needed in image, configs are copied separately)
 docker-compose*.yml
 
 # Examples and tests
