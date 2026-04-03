@@ -243,7 +243,7 @@ func TestCuckooFilterConcurrency(t *testing.T) {
 		// Add some keys first
 		for i := 0; i < 100; i++ {
 			key := []byte(fmt.Sprintf("read-test-%d", i))
-			cuckooFilter.Add(key)
+			_ = cuckooFilter.Add(key)
 		}
 
 		const numReaders = 10
@@ -290,14 +290,14 @@ func BenchmarkCuckooFilter(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			key := []byte(fmt.Sprintf("bench-add-%d", i))
-			cuckooFilter.Add(key)
+			_ = cuckooFilter.Add(key)
 		}
 	})
 
 	// Pre-populate for Contains benchmark
 	for i := 0; i < 10000; i++ {
 		key := []byte(fmt.Sprintf("bench-contains-%d", i))
-		cuckooFilter.Add(key)
+		_ = cuckooFilter.Add(key)
 	}
 
 	// Benchmark Contains operations
@@ -314,7 +314,7 @@ func BenchmarkCuckooFilter(b *testing.B) {
 		// Pre-populate
 		for i := 0; i < b.N; i++ {
 			key := []byte(fmt.Sprintf("bench-delete-%d", i))
-			cuckooFilter.Add(key)
+			_ = cuckooFilter.Add(key)
 		}
 
 		b.ResetTimer()

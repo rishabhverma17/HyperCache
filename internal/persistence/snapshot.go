@@ -119,8 +119,8 @@ func (sm *SnapshotManager) CreateSnapshot(ctx context.Context, data map[string]i
 	if gzWriter, ok := writer.(*gzip.Writer); ok {
 		gzWriter.Close()
 	}
-	file.Sync()
-	file.Close()
+	_ = file.Sync()
+	_ = file.Close()
 
 	// Atomically move temp file to final location
 	if err := os.Rename(tempFile, filepath); err != nil {
@@ -164,8 +164,8 @@ func (sm *SnapshotManager) LoadSnapshot(ctx context.Context) (map[string]interfa
 
 	// Check if file is compressed (read magic bytes)
 	magic := make([]byte, 2)
-	file.Read(magic)
-	file.Seek(0, 0) // Reset to beginning
+	_, _ = file.Read(magic)
+	_, _ = file.Seek(0, 0) // Reset to beginning
 
 	if magic[0] == 0x1f && magic[1] == 0x8b { // gzip magic bytes
 		gzReader, err := gzip.NewReader(file)

@@ -149,8 +149,8 @@ func (l *Logger) writeEntry(entry LogEntry) {
 	defer l.mu.RUnlock()
 
 	for _, writer := range l.writers {
-		writer.Write(data)
-		writer.Write([]byte("\n"))
+		_, _ = writer.Write(data)
+		_, _ = writer.Write([]byte("\n"))
 	}
 }
 

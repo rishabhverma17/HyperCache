@@ -459,7 +459,7 @@ func (cf *CuckooFilter) randomSlot(bucket *bucket) uint8 {
 
 	// Use crypto/rand for better randomness
 	randBytes := make([]byte, 1)
-	rand.Read(randBytes)
+	_, _ = rand.Read(randBytes)
 	return occupiedSlots[int(randBytes[0])%len(occupiedSlots)]
 }
 
