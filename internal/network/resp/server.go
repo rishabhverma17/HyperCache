@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"hypercache/internal/cluster"
-	"hypercache/internal/logging"
 	"hypercache/internal/storage"
 )
 
@@ -131,11 +130,8 @@ func (s *Server) Start() error {
 	s.wg.Add(1)
 	go s.acceptConnections()
 
-	// Start cluster event listener for replication
-	if s.coord != nil && s.coord.GetEventBus() != nil {
-		s.wg.Add(1)
-		go s.clusterEventListener()
-	}
+	// Note: cluster event replication is handled by main.go's handleReplicationEvent
+	// to avoid duplicate processing of gossip events
 
 	return nil
 }
@@ -653,127 +649,6 @@ func (s *Server) connectionCleaner() {
 }
 
 // clusterEventListener listens for cluster events and applies data operations
-func (s *Server) clusterEventListener() {
-	defer s.wg.Done()
-
-	fmt.Printf("[REPLICATION] Starting cluster event listener for node %s\n", s.coord.GetLocalNodeID())
-
-	eventBus := s.coord.GetEventBus()
-	eventChan := eventBus.Subscribe(cluster.EventDataOperation)
-
-	fmt.Printf("[REPLICATION] Subscribed to EventDataOperation events\n")
-
-	for {
-		select {
-		case <-s.ctx.Done():
-			fmt.Printf("[REPLICATION] Event listener shutting down for node %s\n", s.coord.GetLocalNodeID())
-			return
-		case event, ok := <-eventChan:
-			if !ok {
-				fmt.Printf("[REPLICATION] Event channel closed for node %s\n", s.coord.GetLocalNodeID())
-				return // Channel closed
-			}
-
-			correlationInfo := ""
-			if event.CorrelationID != "" {
-				correlationInfo = fmt.Sprintf(" [correlationId=%s]", event.CorrelationID)
-			}
-
-			fmt.Printf("[REPLICATION]%s Received event: type=%s, nodeID='%s', localID='%s'\n",
-				correlationInfo, event.Type, event.NodeID, s.coord.GetLocalNodeID())
-
-			// Handle data operation events from other nodes
-			if event.Type == cluster.EventDataOperation && event.NodeID != s.coord.GetLocalNodeID() {
-				fmt.Printf("[REPLICATION]%s Processing data operation from remote node %s\n",
-					correlationInfo, event.NodeID)
-				s.handleClusterSetEvent(event)
-			} else {
-				if event.Type == cluster.EventDataOperation {
-					fmt.Printf("[REPLICATION]%s Skipping event: same_node=%v (nodeID='%s' vs localID='%s')\n",
-						correlationInfo, event.NodeID == s.coord.GetLocalNodeID(), event.NodeID, s.coord.GetLocalNodeID())
-				} else {
-					fmt.Printf("[REPLICATION]%s Skipping event: type=%s (not data_operation)\n",
-						correlationInfo, event.Type)
-				}
-			}
-		}
-	}
-}
-
-// handleClusterSetEvent applies a SET operation received from another node
-func (s *Server) handleClusterSetEvent(event cluster.ClusterEvent) {
-	// Create a context with correlation ID from the event using the proper key
-	ctx := context.Background()
-	if event.CorrelationID != "" {
-		ctx = context.WithValue(ctx, logging.CorrelationIDKey, event.CorrelationID)
-	}
-
-	correlationInfo := ""
-	if event.CorrelationID != "" {
-		correlationInfo = fmt.Sprintf(" [correlationId=%s]", event.CorrelationID)
-	}
-
-	fmt.Printf("[REPLICATION]%s Processing event from node %s: %+v\n",
-		correlationInfo, event.NodeID, event.Data)
-
-	data, ok := event.Data.(map[string]interface{})
-	if !ok {
-		fmt.Printf("[REPLICATION]%s ERROR: Invalid event data type: %T\n",
-			correlationInfo, event.Data)
-		return // Invalid event data
-	}
-
-	operation, ok := data["operation"].(string)
-	if !ok || (operation != "SET" && operation != "DELETE") {
-		fmt.Printf("[REPLICATION]%s ERROR: Invalid operation: %v (type: %T)\n",
-			correlationInfo, data["operation"], data["operation"])
-		return // Not a supported operation
-	}
-
-	key, ok := data["key"].(string)
-	if !ok {
-		fmt.Printf("[REPLICATION]%s ERROR: Invalid key: %v (type: %T)\n",
-			correlationInfo, data["key"], data["key"])
-		return // Invalid key
-	}
-
-	if operation == "SET" {
-		value := data["value"] // Accept any type — store handles serialization
-
-		ttlSeconds, _ := data["ttl"].(float64)
-		ttl := time.Duration(ttlSeconds) * time.Second
-
-		fmt.Printf("[REPLICATION]%s Applying SET: key=%s, value=%v, ttl=%v\n",
-			correlationInfo, key, value, ttl)
-
-		// Apply the SET operation to local storage (replication) with context
-		err := s.store.SetWithContext(ctx, key, value, "", ttl)
-		if err != nil {
-			fmt.Printf("[REPLICATION]%s ERROR: Failed to replicate SET: %v\n",
-				correlationInfo, err)
-			// Log error but don't fail - this is best-effort replication
-			atomic.AddUint64(&s.stats.ErrorsEncountered, 1)
-		} else {
-			fmt.Printf("[REPLICATION]%s SUCCESS: Replicated SET for key=%s\n",
-				correlationInfo, key)
-		}
-	} else if operation == "DELETE" {
-		fmt.Printf("[REPLICATION]%s Applying DELETE: key=%s\n", correlationInfo, key)
-
-		// Apply the DELETE operation to local storage (replication)
-		err := s.store.Delete(key)
-		if err != nil {
-			fmt.Printf("[REPLICATION]%s ERROR: Failed to replicate DELETE: %v\n",
-				correlationInfo, err)
-			// Log error but don't fail - this is best-effort replication
-			atomic.AddUint64(&s.stats.ErrorsEncountered, 1)
-		} else {
-			fmt.Printf("[REPLICATION]%s SUCCESS: Replicated DELETE for key=%s\n",
-				correlationInfo, key)
-		}
-	}
-}
-
 // cleanupIdleConnections removes idle connections
 func (s *Server) cleanupIdleConnections() {
 	if s.config.IdleTimeout <= 0 {

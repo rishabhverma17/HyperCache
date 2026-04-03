@@ -39,6 +39,14 @@ RUN addgroup -g 1000 hypercache && \
 COPY --from=builder /app/hypercache /hypercache
 RUN chmod +x /hypercache
 
+# Copy config files into image so docker-compose doesn't need local mounts
+COPY --from=builder /app/configs/docker/ /app/configs/docker/
+COPY --from=builder /app/configs/node1-config.yaml /app/configs/
+COPY --from=builder /app/configs/node2-config.yaml /app/configs/
+COPY --from=builder /app/configs/node3-config.yaml /app/configs/
+COPY --from=builder /app/filebeat-docker.yml /app/filebeat-docker.yml
+COPY --from=builder /app/grafana/provisioning/ /app/grafana/provisioning/
+
 # Set working directory
 WORKDIR /app
 

@@ -1,18 +1,21 @@
-version: '3.8'
-
 services:
-  # Initialize volumes with proper permissions
+  # Initialize volumes and extract configs from HyperCache image
   volume-init:
-    image: alpine:3.18
-    command: |
-      sh -c "
-        mkdir -p /app/logs && 
+    image: rishabhverma17/hypercache:latest
+    user: root
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        mkdir -p /app/logs /shared/configs /shared/filebeat /shared/grafana &&
+        cp /app/configs/docker/* /shared/configs/ 2>/dev/null || true &&
+        cp /app/filebeat-docker.yml /shared/filebeat/filebeat.yml 2>/dev/null || true &&
+        cp -r /app/grafana/provisioning/* /shared/grafana/ 2>/dev/null || true &&
         chown -R 1000:1000 /app/logs &&
         chmod -R 755 /app/logs &&
-        echo 'Volumes initialized with proper permissions'
-      "
+        echo 'Volumes initialized and configs extracted'
     volumes:
       - hypercache_logs:/app/logs
+      - shared_configs:/shared
     restart: "no"
 
   # HyperCache Node 1 (Bootstrap node)
@@ -28,9 +31,10 @@ services:
       - DATA_DIR=/data
       - LOG_LEVEL=info
     volumes:
-      - ./configs/docker/node1-config.yaml:/config/hypercache.yaml:ro
+      - shared_configs:/shared:ro
       - hypercache_node1_data:/data
       - hypercache_logs:/app/logs
+    command: ["--config", "/shared/configs/node1-config.yaml", "--protocol", "resp"]
     ports:
       - "8080:8080"  # RESP Protocol
       - "9080:9080"  # HTTP API
@@ -65,9 +69,10 @@ services:
       - DATA_DIR=/data
       - LOG_LEVEL=info
     volumes:
-      - ./configs/docker/node2-config.yaml:/config/hypercache.yaml:ro
+      - shared_configs:/shared:ro
       - hypercache_node2_data:/data
       - hypercache_logs:/app/logs
+    command: ["--config", "/shared/configs/node2-config.yaml", "--protocol", "resp"]
     ports:
       - "8081:8080"  # RESP Protocol
       - "9081:9080"  # HTTP API
@@ -104,9 +109,10 @@ services:
       - DATA_DIR=/data
       - LOG_LEVEL=info
     volumes:
-      - ./configs/docker/node3-config.yaml:/config/hypercache.yaml:ro
+      - shared_configs:/shared:ro
       - hypercache_node3_data:/data
       - hypercache_logs:/app/logs
+    command: ["--config", "/shared/configs/node3-config.yaml", "--protocol", "resp"]
     ports:
       - "8082:8080"  # RESP Protocol
       - "9082:9080"  # HTTP API
@@ -160,11 +166,14 @@ services:
     container_name: hypercache-filebeat
     user: root
     volumes:
-      - ./filebeat-docker.yml:/usr/share/filebeat/filebeat.yml:ro
+      - shared_configs:/shared:ro
       - hypercache_logs:/var/log/hypercache:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["filebeat", "-e", "-c", "/shared/filebeat/filebeat.yml"]
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       elasticsearch:
         condition: service_healthy
     networks:
@@ -179,9 +188,10 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin123
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_PATHS_PROVISIONING=/shared/grafana
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      - shared_configs:/shared:ro
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -194,6 +204,7 @@ volumes:
   hypercache_node2_data:
   hypercache_node3_data:
   hypercache_logs:
+  shared_configs:
   elasticsearch_data:
   grafana_data:
 

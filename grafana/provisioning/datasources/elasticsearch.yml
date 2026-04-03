@@ -5,7 +5,7 @@ datasources:
     type: elasticsearch
     access: proxy
     url: http://hypercache-elasticsearch:9200
-    database: "hypercache-logs-*"
+    database: ".ds-hypercache-logs*"
     isDefault: true
     jsonData:
       interval: Daily
