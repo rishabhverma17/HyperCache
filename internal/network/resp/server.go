@@ -71,11 +71,6 @@ type ClientConn struct {
 	parser    *Parser
 	formatter *Formatter
 	lastUsed  time.Time
-
-	// Command pipeline
-	pipeline     []Command
-	pipelineMux  sync.Mutex
-	pipelineMode bool
 }
 
 // DefaultServerConfig returns default server configuration

@@ -693,11 +693,6 @@ func (s *BasicStore) evictExpiredItems() uint64 {
 	return s.evictExpiredItemsUnsafe()
 }
 
-// evictLeastAccessed removes the least accessed items (assumes lock is held)
-func (s *BasicStore) evictLeastAccessed(count uint64) uint64 {
-	return s.evictLeastAccessedUnsafe(count)
-}
-
 // cleanupExpiredItems runs periodic cleanup of expired items
 func (s *BasicStore) cleanupExpiredItems() {
 	ticker := time.NewTicker(s.config.CleanupInterval)

@@ -25,7 +25,6 @@ import (
 var (
 	configPath = flag.String("config", "configs/hypercache.yaml", "Path to configuration file")
 	nodeID     = flag.String("node-id", "", "Unique node identifier")
-	bindAddr   = flag.String("bind", "127.0.0.1:7000", "Address to bind the server")
 	protocol   = flag.String("protocol", "internal", "Protocol to use (internal, resp)")
 	port       = flag.Int("port", 7000, "Port to bind the server")
 )

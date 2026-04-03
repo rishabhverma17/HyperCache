@@ -418,33 +418,3 @@ func (he *HybridEngine) Compact() error {
 	// This will be implemented when we have cache data access
 	return fmt.Errorf("compaction requires cache integration")
 }
-
-func (he *HybridEngine) shouldRotateLog() bool {
-	if he.aofManager == nil {
-		return false
-	}
-
-	// Simple size-based rotation logic
-	// This will be enhanced when we implement proper rotation
-	return false // TODO: Implement proper rotation logic
-}
-
-func (he *HybridEngine) rotateLog() {
-	// TODO: Implement log rotation
-	// 1. Close current AOF
-	// 2. Rename to .old
-	// 3. Create new AOF
-	// 4. Trigger compaction if needed
-}
-
-func (he *HybridEngine) calculateChecksum(entry *LogEntry) uint32 {
-	// Simple checksum - in production, use CRC32 or similar
-	sum := uint32(0)
-	for _, b := range []byte(entry.Key) {
-		sum += uint32(b)
-	}
-	for _, b := range entry.Value {
-		sum += uint32(b)
-	}
-	return sum
-}
