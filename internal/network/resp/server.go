@@ -170,11 +170,17 @@ func (s *Server) Stop() error {
 // GetStats returns server statistics
 func (s *Server) GetStats() ServerStats {
 	s.connMutex.RLock()
-	defer s.connMutex.RUnlock()
+	activeConns := int32(len(s.connections))
+	s.connMutex.RUnlock()
 
-	stats := s.stats
-	stats.ActiveConnections = int32(len(s.connections))
-	return stats
+	return ServerStats{
+		TotalConnections:  atomic.LoadUint64(&s.stats.TotalConnections),
+		ActiveConnections: activeConns,
+		CommandsProcessed: atomic.LoadUint64(&s.stats.CommandsProcessed),
+		ErrorsEncountered: atomic.LoadUint64(&s.stats.ErrorsEncountered),
+		BytesSent:         atomic.LoadUint64(&s.stats.BytesSent),
+		BytesReceived:     atomic.LoadUint64(&s.stats.BytesReceived),
+	}
 }
 
 // acceptConnections accepts new client connections

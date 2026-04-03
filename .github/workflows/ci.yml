@@ -88,14 +88,6 @@ jobs:
           test-results/
           coverage.html
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      if: always()
-      with:
-        file: ./test-results/coverage.out
-        flags: unittests
-        name: codecov-umbrella
-
   integration-tests:
     name: Integration Tests (Newman)
     runs-on: ubuntu-latest
