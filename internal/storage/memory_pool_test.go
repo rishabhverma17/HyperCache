@@ -99,21 +99,28 @@ func TestMemoryPool_AllocationLimits(t *testing.T) {
 func TestMemoryPool_PressureThresholds(t *testing.T) {
 	pool := NewMemoryPool("test-pool", 1000)
 
+	var mu sync.Mutex
 	var warningCalled, criticalCalled, panicCalled bool
 	var warningPressure, criticalPressure, panicPressure float64
 
 	pool.SetPressureHandlers(
 		func(p float64) {
+			mu.Lock()
 			warningCalled = true
 			warningPressure = p
+			mu.Unlock()
 		},
 		func(p float64) {
+			mu.Lock()
 			criticalCalled = true
 			criticalPressure = p
+			mu.Unlock()
 		},
 		func(p float64) {
+			mu.Lock()
 			panicCalled = true
 			panicPressure = p
+			mu.Unlock()
 		},
 	)
 
@@ -124,14 +131,16 @@ func TestMemoryPool_PressureThresholds(t *testing.T) {
 	}
 
 	// Give callbacks time to execute
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	if !warningCalled {
 		t.Error("Expected warning callback to be called")
 	}
 	if warningPressure < 0.85 {
 		t.Errorf("Expected warning pressure >= 0.85, got %f", warningPressure)
 	}
+	mu.Unlock()
 
 	// Allocate to critical threshold (90%)
 	data2, err := pool.Allocate(50)
@@ -139,14 +148,16 @@ func TestMemoryPool_PressureThresholds(t *testing.T) {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	if !criticalCalled {
 		t.Error("Expected critical callback to be called")
 	}
 	if criticalPressure < 0.90 {
 		t.Errorf("Expected critical pressure >= 0.90, got %f", criticalPressure)
 	}
+	mu.Unlock()
 
 	// Allocate to panic threshold (95%)
 	data3, err := pool.Allocate(50)
@@ -154,19 +165,21 @@ func TestMemoryPool_PressureThresholds(t *testing.T) {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	if !panicCalled {
 		t.Error("Expected panic callback to be called")
 	}
 	if panicPressure < 0.95 {
 		t.Errorf("Expected panic pressure >= 0.95, got %f", panicPressure)
 	}
+	mu.Unlock()
 
 	// Cleanup
-	pool.Free(data1)
-	pool.Free(data2)
-	pool.Free(data3)
+	_ = pool.Free(data1)
+	_ = pool.Free(data2)
+	_ = pool.Free(data3)
 }
 
 func TestMemoryPool_ConcurrentOperations(t *testing.T) {
@@ -375,9 +388,14 @@ func TestMemoryPool_CustomThresholds(t *testing.T) {
 		t.Errorf("Valid thresholds were rejected: %v", err)
 	}
 
+	var mu sync.Mutex
 	var warningCalled bool
 	pool.SetPressureHandlers(
-		func(p float64) { warningCalled = true },
+		func(p float64) {
+			mu.Lock()
+			warningCalled = true
+			mu.Unlock()
+		},
 		nil,
 		nil,
 	)
@@ -388,13 +406,15 @@ func TestMemoryPool_CustomThresholds(t *testing.T) {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	if !warningCalled {
 		t.Error("Expected warning callback to be called with custom threshold")
 	}
+	mu.Unlock()
 
-	pool.Free(data)
+	_ = pool.Free(data)
 }
 
 // Benchmark tests
