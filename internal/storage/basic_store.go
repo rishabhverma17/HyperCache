@@ -629,6 +629,16 @@ func (s *BasicStore) FilterContains(key string) bool {
 	return s.filter.Contains([]byte(key))
 }
 
+// FilterAdd adds a key to the cuckoo filter without storing data.
+// Used to pre-populate the filter on gossip receive so that concurrent
+// GET requests see "maybe here" instead of "definitely not here" during
+// the gossip propagation window.
+func (s *BasicStore) FilterAdd(key string) {
+	if s.filter != nil {
+		_ = s.filter.Add([]byte(key))
+	}
+}
+
 // Close shuts down the store and cleans up resources
 func (s *BasicStore) Close() error {
 	// Stop cleanup goroutine

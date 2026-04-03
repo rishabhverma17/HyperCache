@@ -21,14 +21,17 @@
 ## 🎯 **Latest Features** ✅
 
 **Production-ready distributed cache with full observability stack:**
-- ✅ Multi-node cluster deployment
-- ✅ Full Redis client compatibility  
+- ✅ Multi-node cluster deployment with full replication
+- ✅ Full Redis client compatibility (RESP protocol)
+- ✅ Lamport timestamps for causal ordering of distributed writes
+- ✅ Read-repair for gossip propagation window
+- ✅ Early Cuckoo filter sync across nodes
 - ✅ Enterprise persistence (AOF + Snapshots)
-- ✅ Real-time monitoring with Grafana
-- ✅ Centralized logging with Elasticsearch + Filebeat
+- ✅ Structured JSON logging with correlation ID tracing
+- ✅ Real-time monitoring with Grafana + Elasticsearch
 - ✅ HTTP API + RESP protocol support
-- ✅ Advanced memory management
-- ✅ Cuckoo filter integration
+- ✅ Advanced memory management with pressure detection
+- ✅ Cuckoo filter integration for negative lookup acceleration
 
 ### 🔥 **Monitoring & Observability**
 - **Grafana Dashboards**: Real-time metrics visualization
@@ -202,47 +205,52 @@ make deps            Download and tidy dependencies
 - Drop-in replacement for many Redis use cases
 - Standard commands: GET, SET, DEL, EXISTS, PING, INFO, FLUSHALL, DBSIZE
 
+### **Distributed Resilience**
+- **Full Replication**: Every node stores every key — maximum availability, any node serves any request
+- **Lamport Timestamps**: Logical clocks for causal ordering of distributed operations. Stale writes from out-of-order gossip are automatically rejected
+- **Read-Repair**: On local cache miss, peer nodes are queried before returning 404. Bridges the gossip propagation window (~50-500ms) so clients never see stale misses
+- **Early Cuckoo Filter Sync**: Filter is updated immediately on gossip receive, before data is written. Eliminates false "definitely not here" rejections during replication lag
+- **Idempotent Replication**: DELETE on a missing key is a no-op, not an error. Designed for eventual consistency
+- **Correlation ID Tracing**: Every request gets a unique ID that flows across all nodes for end-to-end debugging
+
 ### **Enterprise Persistence & Recovery**
-- **Dual Persistence Strategy**: AOF (Append-Only File) + WAL (Write-Ahead Logging)
+- **Hybrid Persistence**: AOF (Append-Only File) + Snapshot dual strategy
 - **Configurable per Store**: Each data store can have independent persistence policies
-- **Sub-microsecond Writes**: AOF logging with 2.7µs average write latency
-- **Fast Recovery**: Complete data restoration in milliseconds (160µs for 10 entries)
+- **Sub-microsecond Writes**: AOF logging with low-latency write path
+- **Fast Recovery**: Complete data restoration from AOF replay + snapshot loading
 - **Snapshot Support**: Point-in-time recovery with configurable intervals
-- **Durability Guarantees**: Configurable sync policies (fsync, async, periodic)
+- **Durability Guarantees**: Configurable sync policies (always, everysec, no)
 
 ### **Containerized Deployment**
 - **Docker Hub Integration**: Pre-built multi-arch images (amd64, arm64)
 - **Docker Compose Support**: One-command cluster deployment with monitoring
 - **Kubernetes Ready**: StatefulSet manifests with service discovery
-- **Minimal Attack Surface**: Scratch-based images, non-root user
-- **Auto-scaling**: Dynamic cluster membership and load balancing
-- **CI/CD Pipeline**: Automated builds and security scanning
+- **CI/CD Pipeline**: GitHub Actions for lint, test, build, and publish
 
 ### **Advanced Memory Management**
 - **Per-Store Eviction Policies**: Independent LRU, LFU, or session-based eviction per store
-- **Smart Memory Pool**: Pressure monitoring with automatic cleanup
-- **Real-time Usage Tracking**: Memory statistics and alerts
+- **Smart Memory Pool**: Pressure monitoring (warning/critical/panic) with automatic cleanup
+- **Real-time Usage Tracking**: Memory statistics and structured alerts
 - **Configurable Limits**: Store-specific memory boundaries
 
 ### **Probabilistic Data Structures**
-- **Per-Store Cuckoo Filters**: Enable/disable independently for each data store
-- **Configurable False Positive Rate**: Tune precision vs memory usage (0.001 - 0.1)
-- **O(1) Membership Testing**: Bloom-like operations with guaranteed performance
-- **Memory Efficient**: Significant space savings over traditional approaches
+- **Per-Store Cuckoo Filters**: Negative lookup acceleration — instant "definitely not here" for keys that don't exist
+- **Configurable False Positive Rate**: Tune precision vs memory (default 0.01)
+- **O(1) Membership Testing**: Sub-microsecond filter checks before any store lookup
+- **Supports Delete**: Unlike Bloom filters, Cuckoo filters allow key removal
 
 ### **Distributed Architecture**
-- **Multi-node Clustering**: Gossip protocol for node discovery and health monitoring
-- **Consistent Hashing**: Hash-ring based data distribution with virtual nodes
-- **Raft Consensus**: Leader election and distributed coordination
-- **Automatic Failover**: Node failure detection and traffic redistribution
-- **Configurable Replication**: Per-store replication factors
+- **Multi-node Clustering**: Serf gossip protocol for node discovery and health monitoring
+- **Consistent Hash Ring**: 256 virtual nodes with xxhash64 for uniform key distribution
+- **Automatic Failover**: Node failure detection and traffic redistribution via gossip
+- **Inter-node Communication**: HTTP-based read-repair and peer discovery via gossip metadata
 
 ### **Production Monitoring**
-- **Grafana**: Real-time dashboards and alerting
-- **Elasticsearch**: Centralized log storage and search
-- **Filebeat**: Automated log collection and shipping
-- **Health Endpoints**: Built-in monitoring and diagnostics
-- **Metrics Export**: Performance and usage statistics
+- **Structured JSON Logging**: Every log line has timestamp, level, component, action, correlation ID
+- **Grafana Dashboards**: Health overview, performance metrics, system components
+- **Elasticsearch + Filebeat**: Centralized log aggregation with container-scoped filtering
+- **Configurable Log Levels**: debug/info/warn/error/fatal — tunable per node at runtime
+- **Prometheus Metrics**: `/metrics` endpoint with cache stats, cluster health, hit rates
 
 ## � **Project Structure**
 
