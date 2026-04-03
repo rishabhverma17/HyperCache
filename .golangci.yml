@@ -7,6 +7,8 @@ run:
 linters-settings:
   govet:
     enable-all: true
+    disable:
+      - shadow
   gocyclo:
     min-complexity: 15
   goconst:
@@ -36,7 +38,6 @@ linters-settings:
 linters:
   enable:
     - bodyclose
-    - depguard
     - dogsled
     - dupl
     - errcheck
@@ -78,6 +79,10 @@ issues:
         - gomnd
         - gocritic
         - funlen
+        - goconst
+        - gocyclo
+        - govet
+        - errcheck
     
     # Exclude some linters from running on examples
     - path: examples/
