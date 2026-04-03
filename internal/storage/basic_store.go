@@ -84,6 +84,10 @@ type BasicStore struct {
 	stats         BasicStoreStats
 	stopCleanup   chan bool
 	allocatedPtrs map[string][]byte // Track allocated pointers for proper cleanup
+
+	// Tombstones: recently deleted keys — prevents read-repair from resurrecting
+	// keys that were intentionally deleted but gossip hasn't propagated yet.
+	tombstones map[string]time.Time
 }
 
 // serializeValue converts interface{} values to []byte for storage in allocated memory
@@ -226,6 +230,7 @@ func NewBasicStore(config BasicStoreConfig) (*BasicStore, error) {
 		memPool:       memPool,
 		stopCleanup:   make(chan bool),
 		allocatedPtrs: make(map[string][]byte),
+		tombstones:    make(map[string]time.Time),
 		stats: BasicStoreStats{
 			CreatedAt: time.Now(),
 		},
@@ -388,6 +393,9 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 	s.stats.TotalMemory += size
 	s.stats.LastAccess = time.Now()
 
+	// Clear any tombstone for this key (re-creation after delete)
+	delete(s.tombstones, key)
+
 	// Add to eviction policy
 	entry := s.itemToEntry(key, item)
 	s.evictPolicy.OnInsert(entry)
@@ -542,8 +550,11 @@ func (s *BasicStore) Delete(key string) error {
 	// Remove from filter if available
 	if s.filter != nil {
 		s.filter.Delete([]byte(key))
-		// Note: Delete returns bool, but we don't need to handle failure here
 	}
+
+	// Record tombstone so read-repair won't resurrect this key
+	// during the gossip propagation window (~10s is generous)
+	s.tombstones[key] = time.Now().Add(10 * time.Second)
 
 	// Log to persistence if enabled
 	if s.persistEngine != nil {
@@ -637,6 +648,26 @@ func (s *BasicStore) FilterAdd(key string) {
 	if s.filter != nil {
 		_ = s.filter.Add([]byte(key))
 	}
+}
+
+// IsTombstoned returns true if the key was recently deleted locally.
+// Read-repair checks this to avoid resurrecting intentionally deleted keys
+// during the gossip propagation window.
+func (s *BasicStore) IsTombstoned(key string) bool {
+	s.mutex.RLock()
+	expiry, exists := s.tombstones[key]
+	s.mutex.RUnlock()
+	if !exists {
+		return false
+	}
+	if time.Now().After(expiry) {
+		// Tombstone expired — clean it up
+		s.mutex.Lock()
+		delete(s.tombstones, key)
+		s.mutex.Unlock()
+		return false
+	}
+	return true
 }
 
 // Close shuts down the store and cleans up resources

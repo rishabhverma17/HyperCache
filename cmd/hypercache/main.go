@@ -562,7 +562,9 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 			// On local miss, attempt read-repair from a peer node.
 			// This covers the gossip propagation window — the key may exist on
 			// another node but gossip hasn't delivered it here yet.
-			if err != nil && readRepairer != nil {
+			// Skip if the key was recently deleted locally (tombstoned) to avoid
+			// resurrecting an intentionally deleted key from a stale peer.
+			if err != nil && readRepairer != nil && !store.IsTombstoned(key) {
 				result := readRepairer.TryPeers(r.Context(), key)
 				if result != nil && result.Found {
 					value = result.Value
