@@ -328,7 +328,7 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 	if existingItem, exists := s.items[key]; exists {
 		// Free old item's memory
 		if oldPtr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-			s.memPool.Free(oldPtr)
+			_ = s.memPool.Free(oldPtr)
 			delete(s.allocatedPtrs, key)
 		}
 		// Remove from eviction policy
@@ -459,7 +459,7 @@ func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, 
 	// Check expiration
 	if item.IsExpired() {
 		// Remove expired item
-		s.Delete(key)
+		_ = s.Delete(key)
 		s.incrementMissCount()
 		return nil, fmt.Errorf("key expired: %s", key)
 	}
@@ -503,7 +503,7 @@ func (s *BasicStore) Delete(key string) error {
 
 	// Free memory
 	if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-		s.memPool.Free(ptr)
+		_ = s.memPool.Free(ptr)
 		delete(s.allocatedPtrs, key)
 	}
 
@@ -545,7 +545,7 @@ func (s *BasicStore) Clear() error {
 
 	// Free all memory
 	for key, ptr := range s.allocatedPtrs {
-		s.memPool.Free(ptr)
+		_ = s.memPool.Free(ptr)
 		// Notify eviction policy
 		if item, exists := s.items[key]; exists {
 			entry := s.itemToEntry(key, item)
@@ -564,7 +564,7 @@ func (s *BasicStore) Clear() error {
 
 	// Clear filter if available
 	if s.filter != nil {
-		s.filter.Clear()
+		_ = s.filter.Clear()
 	}
 
 	return nil
@@ -616,7 +616,7 @@ func (s *BasicStore) Close() error {
 	}
 
 	// Clear all items
-	s.Clear()
+	_ = s.Clear()
 
 	// Close resources - no specific close method needed for MemoryPool
 	return nil
@@ -662,7 +662,7 @@ func (s *BasicStore) evictForSpace(neededSize uint64) error {
 		if item, exists := s.items[key]; exists {
 			// Free memory
 			if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-				s.memPool.Free(ptr)
+				_ = s.memPool.Free(ptr)
 				delete(s.allocatedPtrs, key)
 			}
 			// Remove from eviction policy
@@ -770,7 +770,7 @@ func (s *BasicStore) evictExpiredItemsUnsafe() uint64 {
 		if !item.ExpiresAt.IsZero() && now.After(item.ExpiresAt) {
 			// Free memory
 			if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-				s.memPool.Free(ptr)
+				_ = s.memPool.Free(ptr)
 				delete(s.allocatedPtrs, key)
 			}
 			// Remove from eviction policy
@@ -817,7 +817,7 @@ func (s *BasicStore) evictLeastAccessedUnsafe(count uint64) uint64 {
 		if item, exists := s.items[key]; exists {
 			// Free memory
 			if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-				s.memPool.Free(ptr)
+				_ = s.memPool.Free(ptr)
 				delete(s.allocatedPtrs, key)
 			}
 			// Remove from eviction policy

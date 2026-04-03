@@ -464,7 +464,7 @@ func (gm *GossipMembership) handleQuery(query *serf.Query) {
 		}
 
 		// Send response (simplified - would normally serialize properly)
-		query.Respond([]byte(fmt.Sprintf("%+v", response)))
+		_ = query.Respond([]byte(fmt.Sprintf("%+v", response)))
 	}
 }
 

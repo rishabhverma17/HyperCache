@@ -71,10 +71,6 @@ func (mp *MemoryPool) Allocate(size int64) ([]byte, error) {
 
 	// Allocate memory
 	data := make([]byte, size)
-	if data == nil {
-		atomic.AddInt64(&mp.allocationFailures, 1)
-		return nil, fmt.Errorf("failed to allocate %d bytes", size)
-	}
 
 	// Track the allocation
 	ptr := uintptr(unsafe.Pointer(&data[0]))

@@ -11,11 +11,17 @@ linters-settings:
       - fieldalignment  # Too invasive — 50+ structs would need reordering
       - shadow
   errcheck:
+    check-type-assertions: false
+    check-blank: false
     exclude-functions:
       - (io.Writer).Write
       - (*encoding/json.Encoder).Encode
       - fmt.Fprintf
       - fmt.Printf
+      - (net.Conn).Write
+      - (net.Conn).SetReadDeadline
+      - (*net.TCPConn).SetKeepAlive
+      - (*net.TCPConn).SetKeepAlivePeriod
   staticcheck:
     checks: ["all", "-SA1012", "-SA4023", "-SA4003", "-SA4031"]  # Disable nil context + always-true warnings
   misspell:

@@ -76,7 +76,7 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 
 	// Start event bus
 	if err := dc.eventBus.Start(ctx); err != nil {
-		dc.membership.Stop(ctx) // Cleanup
+		_ = dc.membership.Stop(ctx) // Cleanup
 		return fmt.Errorf("failed to start event bus: %w", err)
 	}
 
@@ -87,8 +87,8 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 		dc.config.BindPort,
 	)
 	if err != nil {
-		dc.membership.Stop(ctx)
-		dc.eventBus.Stop(ctx)
+		_ = dc.membership.Stop(ctx)
+		_ = dc.eventBus.Stop(ctx)
 		return fmt.Errorf("failed to add local node to hash ring: %w", err)
 	}
 
@@ -113,7 +113,7 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 		Data:      "node_started",
 		Timestamp: time.Now(),
 	}
-	dc.eventBus.Publish(ctx, startupEvent)
+	_ = dc.eventBus.Publish(ctx, startupEvent)
 
 	fmt.Printf("Distributed coordinator started: %s\n", dc.localNodeID)
 
@@ -138,14 +138,14 @@ func (dc *DistributedCoordinator) Stop(ctx context.Context) error {
 		Data:      "node_stopping",
 		Timestamp: time.Now(),
 	}
-	dc.eventBus.Publish(ctx, shutdownEvent)
+	_ = dc.eventBus.Publish(ctx, shutdownEvent)
 
 	// Stop components in reverse order
-	dc.eventBus.Stop(ctx)
-	dc.membership.Stop(ctx)
+	_ = dc.eventBus.Stop(ctx)
+	_ = dc.membership.Stop(ctx)
 
 	// Remove local node from hash ring
-	dc.hashRing.RemoveNode(dc.localNodeID)
+	_ = dc.hashRing.RemoveNode(dc.localNodeID)
 
 	fmt.Printf("Distributed coordinator stopped: %s\n", dc.localNodeID)
 
@@ -273,7 +273,7 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 			Data:      fmt.Sprintf("node_added:%s", member.NodeID),
 			Timestamp: time.Now(),
 		}
-		dc.eventBus.Publish(ctx, topologyEvent)
+		_ = dc.eventBus.Publish(ctx, topologyEvent)
 
 	case MemberLeft, MemberFailed:
 		// Remove node from hash ring
@@ -292,7 +292,7 @@ func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, eve
 			Data:      fmt.Sprintf("node_removed:%s", member.NodeID),
 			Timestamp: time.Now(),
 		}
-		dc.eventBus.Publish(ctx, topologyEvent)
+		_ = dc.eventBus.Publish(ctx, topologyEvent)
 
 	case MemberRecovered:
 		// Update node status in hash ring
@@ -328,7 +328,7 @@ func (dc *DistributedCoordinator) heartbeatLoop(ctx context.Context) {
 			nodeCount := len(dc.membership.GetAliveNodes())
 			load := 1.0 / float64(max(nodeCount, 1)) // Simple load distribution
 
-			dc.hashRing.UpdateNodeLoad(dc.localNodeID, load)
+			_ = dc.hashRing.UpdateNodeLoad(dc.localNodeID, load)
 
 			// Check if we should continue
 			dc.runMu.RLock()

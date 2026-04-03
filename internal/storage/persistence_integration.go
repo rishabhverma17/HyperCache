@@ -166,7 +166,7 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 	// Handle existing item
 	if existingItem, exists := s.items[key]; exists {
 		if oldPtr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-			s.memPool.Free(oldPtr)
+			_ = s.memPool.Free(oldPtr)
 			delete(s.allocatedPtrs, key)
 		}
 		oldEntry := s.itemToEntry(key, existingItem)
@@ -205,7 +205,7 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 
 	// Add to filter
 	if s.filter != nil {
-		s.filter.Add([]byte(key))
+		_ = s.filter.Add([]byte(key))
 	}
 
 	return nil
@@ -220,7 +220,7 @@ func (s *BasicStore) deleteInternal(key string) error {
 
 	// Free memory
 	if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-		s.memPool.Free(ptr)
+		_ = s.memPool.Free(ptr)
 		delete(s.allocatedPtrs, key)
 	}
 
@@ -245,7 +245,7 @@ func (s *BasicStore) deleteInternal(key string) error {
 func (s *BasicStore) clearInternal() {
 	// Free all allocated memory
 	for _, ptr := range s.allocatedPtrs {
-		s.memPool.Free(ptr)
+		_ = s.memPool.Free(ptr)
 	}
 
 	// Clear all data structures

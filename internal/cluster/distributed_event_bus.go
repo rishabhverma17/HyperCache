@@ -308,7 +308,7 @@ func (deb *DistributedEventBus) PublishTopologyChangeEvent(ctx context.Context, 
 
 // GetClusterHealth queries the health of all nodes in the cluster
 func (deb *DistributedEventBus) GetClusterHealth(ctx context.Context) (map[string]interface{}, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+	_, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
 	responses, err := deb.QueryCluster("health-check", map[string]interface{}{

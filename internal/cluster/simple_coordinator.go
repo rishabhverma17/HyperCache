@@ -97,7 +97,7 @@ func (c *SimpleCoordinator) Stop(ctx context.Context) error {
 	c.running = false
 
 	// Remove local node from hash ring
-	c.hashRing.RemoveNode(c.localNodeID)
+	_ = c.hashRing.RemoveNode(c.localNodeID)
 
 	// Close event channels
 	c.eventMu.Lock()
