@@ -24,7 +24,7 @@ services:
     container_name: hypercache-node1
     hostname: hypercache-node1
     user: "1000:1000"
-    command: ["--config", "/config/hypercache.yaml", "--protocol", "resp"]
+    command: ["--config", "/shared/configs/node1-config.yaml", "--protocol", "resp"]
     environment:
       - NODE_ID=node-1
       - CLUSTER_SEEDS=hypercache-node1:7946,hypercache-node2:7946,hypercache-node3:7946
@@ -34,7 +34,6 @@ services:
       - shared_configs:/shared:ro
       - hypercache_node1_data:/data
       - hypercache_logs:/app/logs
-    command: ["--config", "/shared/configs/node1-config.yaml", "--protocol", "resp"]
     ports:
       - "8080:8080"  # RESP Protocol
       - "9080:9080"  # HTTP API
@@ -62,7 +61,7 @@ services:
     container_name: hypercache-node2
     hostname: hypercache-node2
     user: "1000:1000"
-    command: ["--config", "/config/hypercache.yaml", "--protocol", "resp"]
+    command: ["--config", "/shared/configs/node2-config.yaml", "--protocol", "resp"]
     environment:
       - NODE_ID=node-2
       - CLUSTER_SEEDS=hypercache-node1:7946,hypercache-node2:7946,hypercache-node3:7946
@@ -72,7 +71,6 @@ services:
       - shared_configs:/shared:ro
       - hypercache_node2_data:/data
       - hypercache_logs:/app/logs
-    command: ["--config", "/shared/configs/node2-config.yaml", "--protocol", "resp"]
     ports:
       - "8081:8080"  # RESP Protocol
       - "9081:9080"  # HTTP API
@@ -102,7 +100,7 @@ services:
     container_name: hypercache-node3
     hostname: hypercache-node3
     user: "1000:1000"
-    command: ["--config", "/config/hypercache.yaml", "--protocol", "resp"]
+    command: ["--config", "/shared/configs/node3-config.yaml", "--protocol", "resp"]
     environment:
       - NODE_ID=node-3
       - CLUSTER_SEEDS=hypercache-node1:7946,hypercache-node2:7946,hypercache-node3:7946
@@ -112,7 +110,6 @@ services:
       - shared_configs:/shared:ro
       - hypercache_node3_data:/data
       - hypercache_logs:/app/logs
-    command: ["--config", "/shared/configs/node3-config.yaml", "--protocol", "resp"]
     ports:
       - "8082:8080"  # RESP Protocol
       - "9082:9080"  # HTTP API

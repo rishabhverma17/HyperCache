@@ -6,6 +6,7 @@
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)]()
 [![Go Version](https://img.shields.io/badge/Go-1.23.2-blue)]()
 [![Redis Compatible](https://img.shields.io/badge/Redis-Compatible-red)]()
+[![Docker Hub](https://img.shields.io/docker/pulls/rishabhverma17/hypercache?label=Docker%20Hub&logo=docker)](https://hub.docker.com/r/rishabhverma17/hypercache)
 [![Monitoring](https://img.shields.io/badge/Monitoring-Grafana%20%2B%20ELK-orange)]()
 
 [![CI](https://github.com/rishabhverma17/HyperCache/workflows/HyperCache%20CI/badge.svg)](https://github.com/rishabhverma17/HyperCache/actions/workflows/ci.yml)
@@ -37,10 +38,38 @@
 
 ## 🚀 **Quick Start**
 
-### Prerequisites
+### 🐳 Docker (Recommended — no setup required)
+
+Pull from [Docker Hub](https://hub.docker.com/r/rishabhverma17/hypercache) and start the full stack:
+
+```bash
+# Download the compose file
+curl -O https://raw.githubusercontent.com/rishabhverma17/HyperCache/main/docker-compose.cluster.yml
+
+# Start everything (3 HyperCache nodes + Elasticsearch + Grafana + Filebeat)
+docker compose -f docker-compose.cluster.yml up -d
+```
+
+That's it. All configs are baked into the Docker image — no cloning, no local files needed.
+
+```bash
+# Verify the cluster
+curl http://localhost:9080/health
+
+# Store a key
+curl -X PUT http://localhost:9080/api/cache/hello \
+  -H "Content-Type: application/json" -d '{"value": "world"}'
+
+# Read it from a different node (replication)
+curl http://localhost:9082/api/cache/hello
+
+# Open Grafana dashboards
+open http://localhost:3000  # admin / admin123
+```
+
+### Prerequisites (Local Development)
 - Go 1.23.2+
 - `redis-cli` (optional, for RESP testing)
-- Docker & Docker Compose (optional, for containerized deployment)
 
 ### Local Cluster (3 nodes)
 ```bash
@@ -64,14 +93,17 @@ make run
 
 ### Docker Deployment
 ```bash
-# Build Docker image
-make docker-build
+# Pull the latest image from Docker Hub
+docker pull rishabhverma17/hypercache:latest
 
 # Start full stack (3-node cluster + Elasticsearch + Grafana + Filebeat)
-make docker-up
+docker compose -f docker-compose.cluster.yml up -d
+
+# Or build locally and start
+make docker-build && make docker-up
 
 # Stop
-make docker-down
+docker compose -f docker-compose.cluster.yml down
 ```
 
 ### Kubernetes
