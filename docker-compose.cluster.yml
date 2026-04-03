@@ -10,6 +10,7 @@ services:
         cp /app/configs/docker/* /shared/configs/ 2>/dev/null || true &&
         cp /app/filebeat-docker.yml /shared/filebeat/filebeat.yml 2>/dev/null || true &&
         cp -r /app/grafana/provisioning/* /shared/grafana/ 2>/dev/null || true &&
+        sed -i 's|/etc/grafana/provisioning/dashboards|/shared/grafana/dashboards|' /shared/grafana/dashboards/dashboard.yml 2>/dev/null || true &&
         chown -R 1000:1000 /app/logs &&
         chmod -R 755 /app/logs &&
         echo 'Volumes initialized and configs extracted'
@@ -188,7 +189,7 @@ services:
       - GF_PATHS_PROVISIONING=/shared/grafana
     volumes:
       - grafana_data:/var/lib/grafana
-      - shared_configs:/shared:ro
+      - shared_configs:/shared
     depends_on:
       elasticsearch:
         condition: service_healthy
