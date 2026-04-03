@@ -738,21 +738,16 @@ func (s *Server) handleClusterSetEvent(event cluster.ClusterEvent) {
 	}
 
 	if operation == "SET" {
-		value, ok := data["value"].(string)
-		if !ok {
-			fmt.Printf("[REPLICATION]%s ERROR: Invalid value: %v (type: %T)\n",
-				correlationInfo, data["value"], data["value"])
-			return // Invalid value
-		}
+		value := data["value"] // Accept any type — store handles serialization
 
 		ttlSeconds, _ := data["ttl"].(float64)
 		ttl := time.Duration(ttlSeconds) * time.Second
 
-		fmt.Printf("[REPLICATION]%s Applying SET: key=%s, value=%s, ttl=%v\n",
+		fmt.Printf("[REPLICATION]%s Applying SET: key=%s, value=%v, ttl=%v\n",
 			correlationInfo, key, value, ttl)
 
 		// Apply the SET operation to local storage (replication) with context
-		err := s.store.SetWithContext(ctx, key, []byte(value), "", ttl)
+		err := s.store.SetWithContext(ctx, key, value, "", ttl)
 		if err != nil {
 			fmt.Printf("[REPLICATION]%s ERROR: Failed to replicate SET: %v\n",
 				correlationInfo, err)

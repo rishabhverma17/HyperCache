@@ -803,11 +803,7 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 
 		switch operation {
 		case "SET":
-			value, ok := eventData["value"].(string)
-			if !ok {
-				logging.Error(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Invalid value format for SET", fmt.Errorf("expected string, got %T", eventData["value"]), nil)
-				return
-			}
+			value := eventData["value"] // Accept any type — store handles serialization
 
 			var ttl time.Duration
 			if ttlInterface, exists := eventData["ttl"]; exists {
