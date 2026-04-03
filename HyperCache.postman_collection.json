@@ -479,7 +479,7 @@
 							"listen": "prerequest",
 							"script": {
 								"exec": [
-									"await new Promise(resolve => setTimeout(resolve, 2000));"
+									""
 								],
 								"type": "text/javascript"
 							}
@@ -628,7 +628,7 @@
 							"listen": "prerequest",
 							"script": {
 								"exec": [
-									"await new Promise(resolve => setTimeout(resolve, 2000));"
+									""
 								],
 								"type": "text/javascript"
 							}
@@ -806,7 +806,7 @@
 							"listen": "prerequest",
 							"script": {
 								"exec": [
-									"await new Promise(resolve => setTimeout(resolve, 2000));"
+									""
 								],
 								"type": "text/javascript"
 							}

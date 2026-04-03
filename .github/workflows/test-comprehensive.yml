@@ -77,7 +77,7 @@ jobs:
     - name: Run full Postman collection
       run: |
         newman run HyperCache.postman_collection.json \
-          --delay-request 500 --timeout-request 10000 \
+          --delay-request 2000 --timeout-request 10000 \
           --reporters cli,json \
           --reporter-json-export test-results/newman.json
     - name: Cleanup

@@ -114,7 +114,7 @@ jobs:
           --folder "1. Health & Cluster Status" \
           --folder "3. Cache CRUD - Single Node" \
           --folder "9. Cuckoo Filter" \
-          --delay-request 500 \
+          --delay-request 2000 \
           --timeout-request 10000
 
     - name: Cleanup

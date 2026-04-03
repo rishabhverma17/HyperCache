@@ -141,7 +141,7 @@ jobs:
     - name: Run Postman collection via Newman
       run: |
         newman run HyperCache.postman_collection.json \
-          --delay-request 500 \
+          --delay-request 2000 \
           --timeout-request 10000 \
           --reporters cli,json \
           --reporter-json-export test-results/newman-results.json
