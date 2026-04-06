@@ -109,3 +109,21 @@ jobs:
       with:
         name: benchmark-results
         path: benchmark-results/
+
+  scenario-tests:
+    name: Scenario Tests (Real-World Patterns)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - run: go mod download
+    - name: Run deterministic scenarios
+      run: |
+        go test -v -race -timeout=5m -run 'Test(SessionStoreOverflow|ConcurrentReadWrite|TTLExpiry|PersistenceRecovery|StoreLifecycle|HotKeyThunderingHerd)' \
+          ./tests/scenarios/...
+    - name: Run randomized scenarios
+      run: |
+        go test -v -race -timeout=5m -run 'TestRandomized' \
+          ./tests/scenarios/...
