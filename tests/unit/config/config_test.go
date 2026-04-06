@@ -29,8 +29,8 @@ func TestConfigLoading(t *testing.T) {
 			t.Errorf("Expected default max memory '8GB', got %s", cfg.Cache.MaxMemory)
 		}
 
-		if cfg.Cache.DefaultTTL != "1h" {
-			t.Errorf("Expected default TTL '1h', got %s", cfg.Cache.DefaultTTL)
+		if cfg.Cache.DefaultTTL != "0" {
+			t.Errorf("Expected default TTL '0' (infinite), got %s", cfg.Cache.DefaultTTL)
 		}
 
 		if cfg.Logging.Level != "info" {
