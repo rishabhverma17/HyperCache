@@ -253,38 +253,6 @@ func main() {
 	logging.Info(ctx, logging.ComponentMain, logging.ActionStop, "HyperCache shutdown complete")
 }
 
-// Helper function to parse size strings (e.g., "100MB") into int64 bytes
-func parseSize(sizeStr string) int64 {
-	if sizeStr == "" {
-		return 0
-	}
-
-	multipliers := map[string]int64{
-		"B":  1,
-		"KB": 1024,
-		"MB": 1024 * 1024,
-		"GB": 1024 * 1024 * 1024,
-		"TB": 1024 * 1024 * 1024 * 1024,
-	}
-
-	var size int64
-	var unit string
-
-	n, err := fmt.Sscanf(sizeStr, "%d%s", &size, &unit)
-	if err != nil || n != 2 {
-		logging.Warn(nil, logging.ComponentConfig, logging.ActionValidation, "Invalid size format, defaulting to 0", map[string]interface{}{"input": sizeStr})
-		return 0
-	}
-
-	multiplier, exists := multipliers[unit]
-	if !exists {
-		logging.Warn(nil, logging.ComponentConfig, logging.ActionValidation, "Unknown unit in size, defaulting to bytes", map[string]interface{}{"unit": unit, "input": sizeStr})
-		multiplier = 1
-	}
-
-	return size * multiplier
-}
-
 // HTTP API Server for REST endpoints
 func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService, storeManager *storage.StoreManager, port int, nodeID string, cfg *config.Config) error {
 	mux := http.NewServeMux()
