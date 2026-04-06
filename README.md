@@ -463,39 +463,68 @@ network:
   gossip_port: 7946
   
 cache:
-  max_memory: 1GB
-  default_ttl: 1h
-  cleanup_interval: 5m
-  eviction_policy: "session"
+  max_memory: "8GB"
+  default_ttl: "0"            # 0 = infinite (no expiry); set per-store or per-key
+  cuckoo_filter_fpp: 0.01     # 1% false positive rate
+  max_stores: 16              # max stores allowed (1-64)
   
 persistence:
   enabled: true
-  aof_enabled: true
-  snapshot_enabled: true
-  snapshot_interval: 300s
+  strategy: "hybrid"          # "aof", "snapshot", "hybrid"
+  sync_policy: "everysec"     # "always", "everysec", "no"
+```
+
+### Environment Variable Overrides (Docker / K8s)
+Environment variables have highest priority and override both defaults and YAML config:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `HYPERCACHE_DEFAULT_MEMORY` | Default store max memory | `4GB` |
+| `HYPERCACHE_DEFAULT_TTL` | Default store TTL (`0` = infinite) | `0`, `1h`, `30m` |
+| `HYPERCACHE_DEFAULT_EVICTION` | Default store eviction policy | `lru`, `lfu`, `fifo`, `ttl` |
+| `HYPERCACHE_DEFAULT_CUCKOO` | Default store cuckoo filter toggle | `true`, `false` |
+| `HYPERCACHE_MAX_STORES` | Maximum stores allowed | `16` |
+| `HYPERCACHE_CUCKOO_FILTER_FPP` | Cuckoo filter false positive rate | `0.01` |
+| `HYPERCACHE_PERSISTENCE_ENABLED` | Global persistence toggle | `true`, `false` |
+| `HYPERCACHE_PERSISTENCE_STRATEGY` | Global persistence strategy | `hybrid`, `aof`, `snapshot` |
+
+```bash
+# Docker example: override default store config without a YAML file
+docker run -e HYPERCACHE_DEFAULT_MEMORY=4GB \
+           -e HYPERCACHE_DEFAULT_TTL=0 \
+           -e HYPERCACHE_DEFAULT_EVICTION=lru \
+           -e HYPERCACHE_DEFAULT_CUCKOO=true \
+           -e HYPERCACHE_PERSISTENCE_ENABLED=true \
+           -e HYPERCACHE_PERSISTENCE_STRATEGY=hybrid \
+           rishabhverma17/hypercache
 ```
 
 ### Per-Store Configuration
 ```yaml
-# Independent configuration for each data store
+# Only "default" store ships out of the box.
+# Store config is immutable — to change settings, drop and recreate the store.
+# Additional stores can be defined in YAML or created at runtime via API.
 stores:
-  user_sessions:
-    eviction_policy: "session"    # Session-based eviction
-    cuckoo_filter: true          # Enable probabilistic operations
-    persistence: "aof+snapshot"   # Full persistence
-    replication_factor: 3
-    
-  page_cache:
+  - name: "default"
     eviction_policy: "lru"       # LRU eviction
-    cuckoo_filter: false         # Disable for pure cache
-    persistence: "aof_only"      # Write-ahead logging only
-    replication_factor: 2
+    max_memory: "8GB"
+    default_ttl: "0"             # 0 = infinite
+    cuckoo_filter: true          # Enable probabilistic lookups
+    persistence: "hybrid"        # "hybrid", "aof", "snapshot", "disabled"
     
-  temporary_data:
+  - name: "sessions"
+    eviction_policy: "ttl"       # TTL-based eviction
+    max_memory: "1GB"
+    default_ttl: "30m"
+    cuckoo_filter: true
+    persistence: "aof"           # Write-ahead logging only
+    
+  - name: "temporary_data"
     eviction_policy: "lfu"       # Least frequently used
-    cuckoo_filter: true          # Enable for membership tests
-    persistence: "disabled"      # In-memory only
-    replication_factor: 1
+    max_memory: "512MB"
+    default_ttl: "15m"
+    cuckoo_filter: false          # Disable for pure cache
+    persistence: "disabled"       # In-memory only
 ```
 
 ### Monitoring Configuration
@@ -600,22 +629,15 @@ Performance: Batched writes, zero-copy I/O
 #### **Per-Store Persistence Settings**
 ```yaml
 stores:
-  critical_data:
-    persistence:
-      mode: "aof+snapshot"        # Full durability
-      fsync: "always"             # Immediate disk sync
-      snapshot_interval: "60s"    # Frequent snapshots
+  - name: "critical_data"
+    persistence: "hybrid"         # Full durability (AOF + snapshots)
+    # Uses global persistence settings for sync_policy, snapshot_interval, etc.
       
-  session_cache:
-    persistence:
-      mode: "aof_only"           # Write-ahead logging
-      fsync: "periodic"          # Batched sync (1s)
-      compression: true          # Compress log files
+  - name: "session_cache"
+    persistence: "aof"            # Write-ahead logging only
       
-  temporary_cache:
-    persistence:
-      mode: "disabled"           # In-memory only
-      # No disk I/O overhead for temporary data
+  - name: "temporary_cache"
+    persistence: "disabled"       # In-memory only — no disk I/O overhead
 ```
 
 #### **Durability vs Performance Tuning**

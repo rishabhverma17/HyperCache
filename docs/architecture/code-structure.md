@@ -195,19 +195,36 @@ Configuration is handled through `pkg/config/`:
 
 ```go
 type Config struct {
-    Server      ServerConfig      `yaml:"server"`
-    Storage     StorageConfig     `yaml:"storage"`
-    Persistence PersistenceConfig `yaml:"persistence"`
+    Node        NodeConfig        `yaml:"node"`
+    Network     NetworkConfig     `yaml:"network"`
     Cluster     ClusterConfig     `yaml:"cluster"`
+    Storage     StorageConfig     `yaml:"storage"`
+    Cache       CacheConfig       `yaml:"cache"`
+    Persistence PersistenceConfig `yaml:"persistence"`
     Logging     LoggingConfig     `yaml:"logging"`
+    Stores      []StoreConfig     `yaml:"stores"`
+}
+
+type StoreConfig struct {
+    Name           string `yaml:"name"`
+    EvictionPolicy string `yaml:"eviction_policy"`    // lru, lfu, fifo, ttl
+    MaxMemory      string `yaml:"max_memory"`          // e.g. "4GB" (required for non-default)
+    DefaultTTL     string `yaml:"default_ttl"`          // "0" = infinite, "1h", "30m"
+    CuckooFilter   *bool  `yaml:"cuckoo_filter"`       // nil = true (enabled by default)
+    Persistence    string `yaml:"persistence"`          // "hybrid", "aof", "snapshot", "disabled"
 }
 ```
 
-**Configuration Sources:**
-1. Default values (embedded)
-2. Configuration files (YAML)
-3. Environment variables
-4. Command-line flags
+**Configuration Sources (priority order, highest wins):**
+1. Default values (embedded in code)
+2. Configuration file (YAML, via `--config` flag)
+3. Environment variables (for Docker/K8s, prefixed `HYPERCACHE_`)
+
+**Key design decisions:**
+- Only `"default"` store ships out of the box
+- Default TTL is `0` (infinite) — user decides TTL per-store or per-key
+- Store config is immutable after creation — to change, drop and recreate
+- `max_stores` limits total stores (default 16, max 64)
 
 ## Error Handling
 

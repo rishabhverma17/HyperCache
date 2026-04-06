@@ -219,6 +219,7 @@ func (aof *AOFManager) Replay(ctx context.Context) ([]LogEntry, error) {
 	var entries []LogEntry
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
+	skippedLines := 0
 
 	start := time.Now()
 
@@ -233,9 +234,18 @@ func (aof *AOFManager) Replay(ctx context.Context) ([]LogEntry, error) {
 		}
 
 		line := scanner.Text()
+		if line == "" {
+			continue // skip blank lines
+		}
 		entry, err := aof.parseLogEntry(line)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse AOF line %d: %w", lineNum, err)
+			// Skip corrupt lines instead of failing entirely
+			skippedLines++
+			logging.Warn(nil, logging.ComponentPersistence, logging.ActionRestore, "Skipping corrupt AOF line", map[string]interface{}{
+				"line":  lineNum,
+				"error": err.Error(),
+			})
+			continue
 		}
 
 		entries = append(entries, entry)
@@ -250,7 +260,11 @@ func (aof *AOFManager) Replay(ctx context.Context) ([]LogEntry, error) {
 		return nil, fmt.Errorf("error reading AOF: %w", err)
 	}
 
-	logging.Info(nil, logging.ComponentPersistence, logging.ActionRestore, "AOF replay completed", map[string]interface{}{"entries": len(entries), "duration": time.Since(start).String()})
+	logging.Info(nil, logging.ComponentPersistence, logging.ActionRestore, "AOF replay completed", map[string]interface{}{
+		"entries":       len(entries),
+		"skipped_lines": skippedLines,
+		"duration":      time.Since(start).String(),
+	})
 
 	return entries, nil
 }

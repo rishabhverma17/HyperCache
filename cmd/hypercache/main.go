@@ -13,10 +13,8 @@ import (
 	"time"
 
 	"hypercache/internal/cluster"
-	"hypercache/internal/filter"
 	"hypercache/internal/logging"
 	"hypercache/internal/network/resp"
-	"hypercache/internal/persistence"
 	"hypercache/internal/storage"
 	"hypercache/pkg/config"
 )
@@ -129,64 +127,38 @@ func main() {
 
 	// Start server based on protocol
 	if *protocol == "resp" {
-		// Parse cache memory limit
-		maxMemory := uint64(8 * 1024 * 1024 * 1024) // Default 8GB
+		// Create StoreManager to manage multiple named stores
+		storeManager := storage.NewStoreManager(storage.StoreManagerConfig{
+			DataDir:           cfg.Node.DataDir,
+			MaxStores:         cfg.Cache.MaxStores,
+			GlobalPersistence: cfg.Persistence,
+			GlobalCacheConfig: cfg.Cache,
+		})
+		defer storeManager.Close()
 
-		// Parse default TTL
-		defaultTTL := time.Hour
-		if cfg.Cache.DefaultTTL != "" {
-			if parsed, err := time.ParseDuration(cfg.Cache.DefaultTTL); err == nil {
-				defaultTTL = parsed
+		// Create stores from config (YAML-defined)
+		for _, storeCfg := range cfg.Stores {
+			if err := storeManager.CreateStore(storeCfg, shutdownCtx); err != nil {
+				logging.Fatal(ctx, logging.ComponentMain, logging.ActionStart, "Failed to create store", err, map[string]interface{}{"store": storeCfg.Name})
+				os.Exit(1)
 			}
 		}
 
-		// Create storage for RESP server using configuration
-		storeConfig := storage.BasicStoreConfig{
-			Name:             "default",
-			MaxMemory:        maxMemory,
-			DefaultTTL:       defaultTTL,
-			EnableStatistics: true,
-			CleanupInterval:  time.Minute,
-			// Enable persistence if configured
-			PersistenceConfig: &persistence.PersistenceConfig{
-				Enabled:          cfg.Persistence.Enabled,
-				Strategy:         cfg.Persistence.Strategy,
-				DataDirectory:    cfg.Node.DataDir,
-				EnableAOF:        cfg.Persistence.EnableAOF,
-				SyncPolicy:       cfg.Persistence.SyncPolicy,
-				SyncInterval:     cfg.Persistence.SyncInterval,
-				SnapshotInterval: cfg.Persistence.SnapshotInterval,
-				MaxLogSize:       parseSize(cfg.Persistence.MaxLogSize),
-				CompressionLevel: cfg.Persistence.CompressionLevel,
-				RetainLogs:       cfg.Persistence.RetainLogs,
-			},
-			// Enable cuckoo filter
-			FilterConfig: &filter.FilterConfig{
-				Name:              "default",
-				FilterType:        "cuckoo",
-				ExpectedItems:     1000000, // 1M items
-				FalsePositiveRate: cfg.Cache.CuckooFilterFPP,
-				FingerprintSize:   12,
-				BucketSize:        4,
-				EnableAutoResize:  true,
-				EnableStatistics:  true,
-				HashFunction:      "xxhash",
-			},
+		// Load runtime-created stores from stores.json
+		if err := storeManager.LoadRegistry(shutdownCtx); err != nil {
+			logging.Warn(ctx, logging.ComponentStorage, logging.ActionRestore, "Failed to load store registry", map[string]interface{}{"error": err.Error()})
 		}
 
-		store, err := storage.NewBasicStore(storeConfig)
-		if err != nil {
-			logging.Fatal(ctx, logging.ComponentMain, logging.ActionStart, "Failed to create storage", err)
-			os.Exit(1)
-		}
-		defer store.Close()
+		// Save registry so any config-defined stores are also tracked
+		storeManager.SaveRegistry()
 
-		// Start persistence
-		if err := store.StartPersistence(shutdownCtx); err != nil {
-			logging.Warn(ctx, logging.ComponentPersistence, logging.ActionStart, "Failed to start persistence", map[string]interface{}{"error": err.Error()})
-		} else {
-			logging.Info(ctx, logging.ComponentPersistence, logging.ActionStart, "Persistence enabled and started", map[string]interface{}{"data_dir": cfg.Node.DataDir})
-		}
+		logging.Info(ctx, logging.ComponentMain, logging.ActionStart, "Stores initialized", map[string]interface{}{
+			"total_stores": storeManager.StoreCount(),
+			"stores":       storeManager.ListStores(),
+		})
+
+		// Get default store for backward-compatible endpoints
+		defaultStore := storeManager.GetDefaultStore()
 
 		// Create distributed coordinator with configuration-driven clustering
 		clusterConfig := cluster.ClusterConfig{
@@ -230,7 +202,7 @@ func main() {
 				for {
 					select {
 					case event := <-eventsChan:
-						handleReplicationEvent(shutdownCtx, event, store, cfg.Node.ID, coord)
+						handleReplicationEvent(shutdownCtx, event, storeManager, cfg.Node.ID, coord)
 					case <-shutdownCtx.Done():
 						logging.Info(shutdownCtx, logging.ComponentCluster, logging.ActionStop, "Event subscription stopping", map[string]interface{}{
 							"node_id": cfg.Node.ID,
@@ -245,7 +217,8 @@ func main() {
 
 		// Create distributed-aware RESP server using configured address
 		respBindAddr := fmt.Sprintf("%s:%d", cfg.Network.RESPBindAddr, cfg.Network.RESPPort)
-		respServer := resp.NewServer(respBindAddr, store, coord)
+		respServer := resp.NewServer(respBindAddr, defaultStore, coord)
+		respServer.SetStoreManager(storeManager)
 
 		// Start RESP server
 		go func() {
@@ -258,7 +231,7 @@ func main() {
 
 		// Start HTTP API server alongside RESP using configured port
 		go func() {
-			if err := startHTTPServer(shutdownCtx, coord, store, cfg.Network.HTTPPort, cfg.Node.ID); err != nil {
+			if err := startHTTPServer(shutdownCtx, coord, storeManager, cfg.Network.HTTPPort, cfg.Node.ID, cfg); err != nil {
 				logging.Error(ctx, logging.ComponentHTTP, logging.ActionStart, "HTTP API server error", err, nil)
 			}
 		}()
@@ -313,8 +286,10 @@ func parseSize(sizeStr string) int64 {
 }
 
 // HTTP API Server for REST endpoints
-func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService, store *storage.BasicStore, port int, nodeID string) error {
+func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService, storeManager *storage.StoreManager, port int, nodeID string, cfg *config.Config) error {
 	mux := http.NewServeMux()
+
+	store := storeManager.GetDefaultStore()
 
 	// Health endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -433,6 +408,103 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 			"false_positive":  mightExist && !actuallyExists,
 			"node":            nodeID,
 		})
+	})
+
+	// ===== Store Management APIs =====
+
+	// GET /api/stores — list all stores
+	mux.HandleFunc("/api/stores", func(w http.ResponseWriter, r *http.Request) {
+		// Only handle exact /api/stores path, not sub-paths (those are handled below)
+		path := strings.TrimPrefix(r.URL.Path, "/api/stores")
+		if path != "" && path != "/" {
+			// Delegate to store-scoped handlers below
+			handleStoreRequest(w, r, storeManager, coordinator, nodeID)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.Method {
+		case http.MethodGet:
+			stores := storeManager.ListStores()
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"stores":      stores,
+				"total_count": len(stores),
+				"node":        nodeID,
+			})
+
+		case http.MethodPost:
+			var body struct {
+				Name           string `json:"name"`
+				EvictionPolicy string `json:"eviction_policy"`
+				MaxMemory      string `json:"max_memory"`
+				DefaultTTL     string `json:"default_ttl"`
+				CuckooFilter   *bool  `json:"cuckoo_filter"`
+				Persistence    string `json:"persistence"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+				return
+			}
+			if body.Name == "" {
+				http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+				return
+			}
+			if body.MaxMemory == "" {
+				http.Error(w, `{"error":"max_memory is required"}`, http.StatusBadRequest)
+				return
+			}
+			if body.EvictionPolicy == "" {
+				body.EvictionPolicy = "lru"
+			}
+			if body.DefaultTTL == "" {
+				body.DefaultTTL = "0"
+			}
+
+			storeCfg := config.StoreConfig{
+				Name:           body.Name,
+				EvictionPolicy: body.EvictionPolicy,
+				MaxMemory:      body.MaxMemory,
+				DefaultTTL:     body.DefaultTTL,
+				CuckooFilter:   body.CuckooFilter,
+				Persistence:    body.Persistence,
+			}
+
+			if err := storeManager.CreateStore(storeCfg, r.Context()); err != nil {
+				status := http.StatusInternalServerError
+				if strings.Contains(err.Error(), "already exists") {
+					status = http.StatusConflict
+				} else if strings.Contains(err.Error(), "maximum stores") {
+					status = http.StatusTooManyRequests
+				}
+				w.WriteHeader(status)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+
+			storeManager.SaveRegistry()
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"store":   body.Name,
+				"config": map[string]interface{}{
+					"eviction_policy": body.EvictionPolicy,
+					"max_memory":      body.MaxMemory,
+					"default_ttl":     body.DefaultTTL,
+					"cuckoo_filter":   storeCfg.IsCuckooFilterEnabled(),
+					"persistence":     storeCfg.GetPersistence(cfg.Persistence.Strategy),
+					"immutable":       true,
+				},
+				"message": "Store config is immutable. To change, drop and recreate.",
+				"node":    nodeID,
+			})
+
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	// Prometheus-compatible metrics endpoint
@@ -824,8 +896,182 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 	}
 }
 
+// handleStoreRequest handles store-scoped operations:
+//   - GET/DELETE /api/stores/{name} — store info / drop store
+//   - GET/PUT/DELETE /api/stores/{name}/cache/{key} — data operations on a specific store
+func handleStoreRequest(w http.ResponseWriter, r *http.Request, storeManager *storage.StoreManager, coordinator cluster.CoordinatorService, nodeID string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse: /api/stores/{name}[/cache/{key}]
+	path := strings.TrimPrefix(r.URL.Path, "/api/stores/")
+	parts := strings.SplitN(path, "/", 3) // [name] or [name, "cache", key]
+	storeName := parts[0]
+
+	if storeName == "" {
+		http.Error(w, `{"error":"store name required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// If it's just /api/stores/{name} — store info or drop
+	if len(parts) == 1 || (len(parts) == 2 && parts[1] == "") {
+		switch r.Method {
+		case http.MethodGet:
+			s := storeManager.GetStore(storeName)
+			if s == nil {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]interface{}{"error": fmt.Sprintf("store '%s' not found", storeName)})
+				return
+			}
+			stats := s.Stats()
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"store": storeName,
+				"stats": map[string]interface{}{
+					"total_items":  stats.TotalItems,
+					"total_memory": stats.TotalMemory,
+					"hit_count":    stats.HitCount,
+					"miss_count":   stats.MissCount,
+					"hit_rate":     stats.HitRate(),
+				},
+				"node": nodeID,
+			})
+		case http.MethodDelete:
+			if err := storeManager.DropStore(storeName); err != nil {
+				status := http.StatusInternalServerError
+				if strings.Contains(err.Error(), "not found") {
+					status = http.StatusNotFound
+				} else if strings.Contains(err.Error(), "cannot drop") {
+					status = http.StatusForbidden
+				}
+				w.WriteHeader(status)
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": fmt.Sprintf("Store '%s' dropped", storeName)})
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	// Must be /api/stores/{name}/cache/{key}
+	if len(parts) < 3 || parts[1] != "cache" {
+		http.Error(w, `{"error":"invalid path, expected /api/stores/{name}/cache/{key}"}`, http.StatusBadRequest)
+		return
+	}
+
+	key := parts[2]
+	if key == "" {
+		http.Error(w, `{"error":"key is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	s := storeManager.GetStore(storeName)
+	if s == nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": fmt.Sprintf("store '%s' not found", storeName)})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		value, err := s.Get(key)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Key not found", "key": key, "store": storeName, "node": nodeID})
+			return
+		}
+		if b, ok := value.([]byte); ok {
+			value = string(b)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"data":    map[string]interface{}{"key": key, "value": value},
+			"store":   storeName,
+			"node":    nodeID,
+		})
+
+	case http.MethodPut:
+		var body struct {
+			Value interface{} `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+			return
+		}
+		ttl := time.Hour
+		if err := s.Set(key, body.Value, "http-api", ttl); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		// Publish replication event with store name
+		if coordinator != nil && coordinator.GetEventBus() != nil {
+			lamportTS := uint64(0)
+			if coordinator.GetClock() != nil {
+				lamportTS = coordinator.GetClock().Tick()
+			}
+			_ = coordinator.GetEventBus().Publish(r.Context(), cluster.ClusterEvent{
+				Type:          cluster.EventDataOperation,
+				NodeID:        nodeID,
+				CorrelationID: logging.GetCorrelationID(r.Context()),
+				Timestamp:     time.Now(),
+				Data: map[string]interface{}{
+					"operation":  "SET",
+					"key":        key,
+					"value":      body.Value,
+					"ttl":        ttl.Seconds(),
+					"store":      storeName,
+					"lamport_ts": lamportTS,
+				},
+			})
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Key set successfully",
+			"data":    map[string]interface{}{"key": key, "value": body.Value},
+			"store":   storeName,
+			"node":    nodeID,
+		})
+
+	case http.MethodDelete:
+		err := s.Delete(key)
+		existed := err == nil
+
+		if existed && coordinator != nil && coordinator.GetEventBus() != nil {
+			lamportTS := uint64(0)
+			if coordinator.GetClock() != nil {
+				lamportTS = coordinator.GetClock().Tick()
+			}
+			_ = coordinator.GetEventBus().Publish(r.Context(), cluster.ClusterEvent{
+				Type:          cluster.EventDataOperation,
+				NodeID:        nodeID,
+				CorrelationID: logging.GetCorrelationID(r.Context()),
+				Timestamp:     time.Now(),
+				Data: map[string]interface{}{
+					"operation":  "DELETE",
+					"key":        key,
+					"store":      storeName,
+					"lamport_ts": lamportTS,
+				},
+			})
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"existed": existed,
+			"key":     key,
+			"store":   storeName,
+			"node":    nodeID,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // handleReplicationEvent processes incoming replication events from other nodes
-func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, store *storage.BasicStore, nodeID string, coordinator cluster.CoordinatorService) {
+func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, storeManager *storage.StoreManager, nodeID string, coordinator cluster.CoordinatorService) {
 	// Skip events from ourselves — no need to log, the originating request already has full tracing
 	if event.NodeID == nodeID {
 		return
@@ -858,6 +1104,20 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 		key, ok := eventData["key"].(string)
 		if !ok {
 			logging.Error(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Invalid key format", fmt.Errorf("expected string, got %T", eventData["key"]), nil)
+			return
+		}
+
+		// Resolve the target store (defaults to "default" for backward compatibility)
+		storeName := "default"
+		if sn, ok := eventData["store"].(string); ok && sn != "" {
+			storeName = sn
+		}
+		store := storeManager.GetStore(storeName)
+		if store == nil {
+			logging.Warn(correlationCtx, logging.ComponentCluster, logging.ActionReplication, "Store not found for replication event", map[string]interface{}{
+				"store": storeName,
+				"key":   key,
+			})
 			return
 		}
 

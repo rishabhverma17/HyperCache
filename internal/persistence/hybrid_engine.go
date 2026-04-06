@@ -81,6 +81,10 @@ type PersistenceStats struct {
 	ReadErrors  int64 `json:"read_errors"`
 }
 
+// SnapshotDataFunc is a callback that returns the current cache data for snapshotting.
+// It is provided by the store that owns this engine.
+type SnapshotDataFunc func() map[string]interface{}
+
 // HybridEngine implements both AOF and snapshot persistence strategies
 type HybridEngine struct {
 	config  PersistenceConfig
@@ -89,6 +93,9 @@ type HybridEngine struct {
 	// Managers
 	aofManager      *AOFManager
 	snapshotManager *SnapshotManager
+
+	// Callback to get current cache data for snapshots and compaction
+	snapshotDataFn SnapshotDataFunc
 
 	// Background workers
 	ctx    context.Context
@@ -113,6 +120,12 @@ func NewHybridEngine(config PersistenceConfig) *HybridEngine {
 	engine.snapshotManager = NewSnapshotManager(config)
 
 	return engine
+}
+
+// SetSnapshotDataFunc sets the callback used by background workers to get current cache data.
+// Must be called before Start().
+func (he *HybridEngine) SetSnapshotDataFunc(fn SnapshotDataFunc) {
+	he.snapshotDataFn = fn
 }
 
 // Start initializes the persistence engine and starts background workers
@@ -319,8 +332,16 @@ func (he *HybridEngine) snapshotWorker() {
 		case <-he.ctx.Done():
 			return
 		case <-ticker.C:
-			// This will be called from the main cache when data is available
-			logging.Debug(nil, logging.ComponentPersistence, logging.ActionSnapshot, "Snapshot worker tick")
+			if he.snapshotDataFn == nil {
+				logging.Debug(nil, logging.ComponentPersistence, logging.ActionSnapshot, "Snapshot worker tick (no data callback set)")
+				continue
+			}
+			data := he.snapshotDataFn()
+			if err := he.CreateSnapshot(data); err != nil {
+				logging.Warn(nil, logging.ComponentPersistence, logging.ActionSnapshot, "Auto snapshot failed", map[string]interface{}{"error": err.Error()})
+			} else {
+				logging.Info(nil, logging.ComponentPersistence, logging.ActionSnapshot, "Auto snapshot created", map[string]interface{}{"entries": len(data)})
+			}
 		}
 	}
 }
@@ -337,9 +358,16 @@ func (he *HybridEngine) compactionWorker() {
 		case <-he.ctx.Done():
 			return
 		case <-ticker.C:
-			if he.shouldCompact() {
-				logging.Debug(nil, logging.ComponentPersistence, logging.ActionCompaction, "AOF compaction needed")
-				// This will be implemented when integrated with cache
+			if he.shouldCompact() && he.snapshotDataFn != nil {
+				data := he.snapshotDataFn()
+				if err := he.aofManager.Compact(he.ctx, data); err != nil {
+					logging.Warn(nil, logging.ComponentPersistence, logging.ActionCompaction, "AOF compaction failed", map[string]interface{}{"error": err.Error()})
+				} else {
+					he.updateStats(func(stats *PersistenceStats) {
+						stats.CompactionRuns++
+					})
+					logging.Info(nil, logging.ComponentPersistence, logging.ActionCompaction, "AOF compaction completed", map[string]interface{}{"entries": len(data)})
+				}
 			}
 		}
 	}

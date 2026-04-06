@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -73,6 +75,7 @@ type CacheConfig struct {
 	MaxMemory       string  `yaml:"max_memory"`
 	DefaultTTL      string  `yaml:"default_ttl"`
 	CuckooFilterFPP float64 `yaml:"cuckoo_filter_fpp"`
+	MaxStores       int     `yaml:"max_stores"`
 }
 
 // LoggingConfig contains logging configuration
@@ -87,12 +90,15 @@ type LoggingConfig struct {
 	MaxFiles      int    `yaml:"max_files"`      // Maximum number of log files to keep
 }
 
-// StoreConfig represents configuration for individual stores
+// StoreConfig represents configuration for individual stores.
+// Store config is immutable after creation — to change, drop and recreate the store.
 type StoreConfig struct {
-	Name           string        `yaml:"name"`
-	EvictionPolicy string        `yaml:"eviction_policy"`
-	MaxMemory      string        `yaml:"max_memory"`
-	DefaultTTL     time.Duration `yaml:"default_ttl"`
+	Name           string `yaml:"name"`
+	EvictionPolicy string `yaml:"eviction_policy"`
+	MaxMemory      string `yaml:"max_memory"`
+	DefaultTTL     string `yaml:"default_ttl"`
+	CuckooFilter   *bool  `yaml:"cuckoo_filter,omitempty"` // nil = inherit global (true)
+	Persistence    string `yaml:"persistence,omitempty"`   // "hybrid", "aof", "snapshot", "disabled"; empty = inherit global
 }
 
 // Load reads and parses the configuration file
@@ -134,8 +140,9 @@ func Load(path string) (*Config, error) {
 		},
 		Cache: CacheConfig{
 			MaxMemory:       "8GB",
-			DefaultTTL:      "1h",
+			DefaultTTL:      "0",  // 0 = infinite (no expiry by default)
 			CuckooFilterFPP: 0.01, // 1% false positive rate
+			MaxStores:       16,
 		},
 		Logging: LoggingConfig{
 			Level:         "info",
@@ -151,20 +158,8 @@ func Load(path string) (*Config, error) {
 			{
 				Name:           "default",
 				EvictionPolicy: "lru",
-				MaxMemory:      "4GB",
-				DefaultTTL:     time.Hour,
-			},
-			{
-				Name:           "sessions",
-				EvictionPolicy: "ttl",
-				MaxMemory:      "1GB",
-				DefaultTTL:     30 * time.Minute,
-			},
-			{
-				Name:           "analytics",
-				EvictionPolicy: "lfu",
-				MaxMemory:      "2GB",
-				DefaultTTL:     24 * time.Hour,
+				MaxMemory:      "8GB",
+				DefaultTTL:     "0",
 			},
 		},
 	}
@@ -175,6 +170,7 @@ func Load(path string) (*Config, error) {
 		if os.IsNotExist(err) {
 			// File doesn't exist, use defaults
 			fmt.Printf("⚠️  Configuration file %s not found, using defaults\n", path)
+			config.applyEnvOverrides()
 			return config, nil
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -184,6 +180,9 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	// Apply environment variable overrides (highest priority — for Docker/K8s)
+	config.applyEnvOverrides()
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -214,6 +213,14 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("at least one store must be configured")
 	}
 
+	if c.Cache.MaxStores < 1 || c.Cache.MaxStores > 64 {
+		return fmt.Errorf("cache.max_stores must be between 1 and 64")
+	}
+
+	if len(c.Stores) > c.Cache.MaxStores {
+		return fmt.Errorf("configured %d stores but cache.max_stores is %d", len(c.Stores), c.Cache.MaxStores)
+	}
+
 	// Validate store configurations
 	storeNames := make(map[string]bool)
 	for _, store := range c.Stores {
@@ -227,6 +234,10 @@ func (c *Config) Validate() error {
 
 		if !isValidEvictionPolicy(store.EvictionPolicy) {
 			return fmt.Errorf("invalid eviction policy for store %s: %s", store.Name, store.EvictionPolicy)
+		}
+
+		if store.Persistence != "" && !isValidStorePersistence(store.Persistence) {
+			return fmt.Errorf("invalid persistence for store %s: %s (valid: hybrid, aof, snapshot, disabled)", store.Name, store.Persistence)
 		}
 	}
 
@@ -277,6 +288,96 @@ func isValidSyncPolicy(policy string) bool {
 		"no":       true, // Let the OS handle syncing
 	}
 	return validPolicies[policy]
+}
+
+// isValidStorePersistence checks if a per-store persistence setting is valid
+func isValidStorePersistence(p string) bool {
+	validPolicies := map[string]bool{
+		"hybrid":   true,
+		"aof":      true,
+		"snapshot": true,
+		"disabled": true,
+	}
+	return validPolicies[p]
+}
+
+// IsCuckooFilterEnabled returns whether the cuckoo filter is enabled for a store.
+// If not explicitly set on the store, returns true (enabled by default).
+func (sc *StoreConfig) IsCuckooFilterEnabled() bool {
+	if sc.CuckooFilter == nil {
+		return true // enabled by default
+	}
+	return *sc.CuckooFilter
+}
+
+// GetPersistence returns the effective persistence strategy for a store.
+// If not set on the store, returns the provided global default.
+func (sc *StoreConfig) GetPersistence(globalStrategy string) string {
+	if sc.Persistence == "" {
+		return globalStrategy
+	}
+	return sc.Persistence
+}
+
+// applyEnvOverrides applies environment variable overrides to the config.
+// Env vars have highest priority: YAML defaults < config file < env vars.
+//
+// Supported env vars:
+//
+//	HYPERCACHE_DEFAULT_MEMORY       - default store max_memory (e.g. "4GB")
+//	HYPERCACHE_DEFAULT_TTL          - default store TTL (e.g. "0", "1h", "30m")
+//	HYPERCACHE_DEFAULT_EVICTION     - default store eviction policy (lru, lfu, fifo, ttl)
+//	HYPERCACHE_DEFAULT_CUCKOO       - default store cuckoo filter (true/false)
+//	HYPERCACHE_MAX_STORES           - max number of stores (1-64)
+//	HYPERCACHE_CUCKOO_FILTER_FPP    - global cuckoo filter false positive rate (e.g. "0.01")
+//	HYPERCACHE_PERSISTENCE_ENABLED  - global persistence enabled (true/false)
+//	HYPERCACHE_PERSISTENCE_STRATEGY - global persistence strategy (hybrid, aof, snapshot)
+func (c *Config) applyEnvOverrides() {
+	// Default store overrides — find or create the "default" store entry
+	defaultIdx := -1
+	for i, s := range c.Stores {
+		if s.Name == "default" {
+			defaultIdx = i
+			break
+		}
+	}
+	if defaultIdx == -1 {
+		// No default store in config; prepend one
+		c.Stores = append([]StoreConfig{{Name: "default", EvictionPolicy: "lru", MaxMemory: c.Cache.MaxMemory, DefaultTTL: c.Cache.DefaultTTL}}, c.Stores...)
+		defaultIdx = 0
+	}
+
+	if v := os.Getenv("HYPERCACHE_DEFAULT_MEMORY"); v != "" {
+		c.Stores[defaultIdx].MaxMemory = v
+	}
+	if v := os.Getenv("HYPERCACHE_DEFAULT_TTL"); v != "" {
+		c.Stores[defaultIdx].DefaultTTL = v
+	}
+	if v := os.Getenv("HYPERCACHE_DEFAULT_EVICTION"); v != "" {
+		c.Stores[defaultIdx].EvictionPolicy = v
+	}
+	if v := os.Getenv("HYPERCACHE_DEFAULT_CUCKOO"); v != "" {
+		b := strings.EqualFold(v, "true") || v == "1"
+		c.Stores[defaultIdx].CuckooFilter = &b
+	}
+
+	// Global overrides
+	if v := os.Getenv("HYPERCACHE_MAX_STORES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Cache.MaxStores = n
+		}
+	}
+	if v := os.Getenv("HYPERCACHE_CUCKOO_FILTER_FPP"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.Cache.CuckooFilterFPP = f
+		}
+	}
+	if v := os.Getenv("HYPERCACHE_PERSISTENCE_ENABLED"); v != "" {
+		c.Persistence.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("HYPERCACHE_PERSISTENCE_STRATEGY"); v != "" {
+		c.Persistence.Strategy = v
+	}
 }
 
 // ToClusterConfig converts the application config to internal cluster config format

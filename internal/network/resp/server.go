@@ -22,6 +22,9 @@ type Server struct {
 	store    *storage.BasicStore
 	coord    cluster.CoordinatorService
 
+	// Multi-store support
+	storeManager *storage.StoreManager
+
 	// Connection management
 	connections map[net.Conn]*ClientConn
 	connMutex   sync.RWMutex
@@ -64,12 +67,13 @@ type ServerStats struct {
 
 // ClientConn represents a client connection
 type ClientConn struct {
-	id        uint64
-	conn      net.Conn
-	reader    *bufio.Reader
-	parser    *Parser
-	formatter *Formatter
-	lastUsed  time.Time
+	id            uint64
+	conn          net.Conn
+	reader        *bufio.Reader
+	parser        *Parser
+	formatter     *Formatter
+	lastUsed      time.Time
+	selectedStore string // per-connection store selection; empty = "default"
 }
 
 // DefaultServerConfig returns default server configuration
@@ -99,6 +103,11 @@ func NewServer(address string, store *storage.BasicStore, coord cluster.Coordina
 		cancel:      cancel,
 		config:      DefaultServerConfig(),
 	}
+}
+
+// SetStoreManager sets the multi-store manager for SELECT/CREATE/STORES commands.
+func (s *Server) SetStoreManager(sm *storage.StoreManager) {
+	s.storeManager = sm
 }
 
 // NewServerWithConfig creates a new RESP server with custom configuration
@@ -296,7 +305,7 @@ func (s *Server) processCommand(clientConn *ClientConn, value Value) error {
 	}
 
 	// Route command
-	response, err := s.routeCommand(*cmd)
+	response, err := s.routeCommand(clientConn, *cmd)
 	if err != nil {
 		return err
 	}
@@ -312,17 +321,17 @@ func (s *Server) processCommand(clientConn *ClientConn, value Value) error {
 }
 
 // routeCommand routes a command to the appropriate handler
-func (s *Server) routeCommand(cmd Command) ([]byte, error) {
+func (s *Server) routeCommand(clientConn *ClientConn, cmd Command) ([]byte, error) {
 	switch strings.ToUpper(cmd.Name) {
 	// Key-value commands
 	case "GET":
-		return s.handleGet(cmd)
+		return s.handleGet(clientConn, cmd)
 	case "SET":
-		return s.handleSet(cmd)
+		return s.handleSet(clientConn, cmd)
 	case "DEL", "DELETE":
-		return s.handleDel(cmd)
+		return s.handleDel(clientConn, cmd)
 	case "EXISTS":
-		return s.handleExists(cmd)
+		return s.handleExists(clientConn, cmd)
 	case "TTL":
 		return s.handleTTL(cmd)
 	case "EXPIRE":
@@ -338,26 +347,48 @@ func (s *Server) routeCommand(cmd Command) ([]byte, error) {
 
 	// Administrative commands
 	case "FLUSHALL":
-		return s.handleFlushAll(cmd)
+		return s.handleFlushAll(clientConn, cmd)
 	case "DBSIZE":
-		return s.handleDBSize(cmd)
+		return s.handleDBSize(clientConn, cmd)
+
+	// Multi-store commands
+	case "SELECT":
+		return s.handleSelect(clientConn, cmd)
+	case "STORES":
+		return s.handleStores(cmd)
 
 	default:
 		return nil, fmt.Errorf("unknown command: %s", cmd.Name)
 	}
 }
 
+// getActiveStore returns the store for the current connection.
+// Uses the per-connection selection, falling back to the default store.
+func (s *Server) getActiveStore(clientConn *ClientConn) *storage.BasicStore {
+	name := clientConn.selectedStore
+	if name == "" {
+		name = "default"
+	}
+	if s.storeManager != nil {
+		if st := s.storeManager.GetStore(name); st != nil {
+			return st
+		}
+	}
+	return s.store // fallback to default
+}
+
 // Command handlers
 
-func (s *Server) handleGet(cmd Command) ([]byte, error) {
+func (s *Server) handleGet(clientConn *ClientConn, cmd Command) ([]byte, error) {
 	if len(cmd.Args) != 1 {
 		return nil, fmt.Errorf("wrong number of arguments for GET")
 	}
 
 	key := cmd.Args[0]
+	store := s.getActiveStore(clientConn)
 
 	// DISTRIBUTED GET: Check local store first
-	value, err := s.store.Get(key)
+	value, err := store.Get(key)
 	if err == nil {
 		// Key found locally, return it
 		var bytes []byte
@@ -399,13 +430,14 @@ func (s *Server) handleGet(cmd Command) ([]byte, error) {
 	return formatter.FormatNull(), nil
 }
 
-func (s *Server) handleSet(cmd Command) ([]byte, error) {
+func (s *Server) handleSet(clientConn *ClientConn, cmd Command) ([]byte, error) {
 	if len(cmd.Args) < 2 {
 		return nil, fmt.Errorf("wrong number of arguments for SET")
 	}
 
 	key := cmd.Args[0]
 	value := []byte(cmd.Args[1]) // Store as []byte — Redis-native binary-safe storage
+	store := s.getActiveStore(clientConn)
 
 	// Parse optional arguments (EX, PX, NX, XX, etc.)
 	var ttl time.Duration
@@ -442,7 +474,7 @@ func (s *Server) handleSet(cmd Command) ([]byte, error) {
 
 	// DISTRIBUTED SET: Store on all replica nodes
 	// Set value in local store first
-	err := s.store.Set(key, value, "", ttl)
+	err := store.Set(key, value, "", ttl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set key locally: %w", err)
 	}
@@ -473,15 +505,16 @@ func (s *Server) handleSet(cmd Command) ([]byte, error) {
 	return formatter.FormatSimpleString("OK"), nil
 }
 
-func (s *Server) handleDel(cmd Command) ([]byte, error) {
+func (s *Server) handleDel(clientConn *ClientConn, cmd Command) ([]byte, error) {
 	if len(cmd.Args) == 0 {
 		return nil, fmt.Errorf("wrong number of arguments for DEL")
 	}
 
 	deleted := int64(0)
+	store := s.getActiveStore(clientConn)
 
 	for _, key := range cmd.Args {
-		err := s.store.Delete(key)
+		err := store.Delete(key)
 		if err == nil {
 			deleted++
 
@@ -512,15 +545,16 @@ func (s *Server) handleDel(cmd Command) ([]byte, error) {
 	return formatter.FormatInteger(deleted), nil
 }
 
-func (s *Server) handleExists(cmd Command) ([]byte, error) {
+func (s *Server) handleExists(clientConn *ClientConn, cmd Command) ([]byte, error) {
 	if len(cmd.Args) == 0 {
 		return nil, fmt.Errorf("wrong number of arguments for EXISTS")
 	}
 
 	count := int64(0)
+	store := s.getActiveStore(clientConn)
 
 	for _, key := range cmd.Args {
-		_, err := s.store.Get(key)
+		_, err := store.Get(key)
 		if err == nil {
 			count++
 		}
@@ -613,8 +647,9 @@ func (s *Server) handleStats(cmd Command) ([]byte, error) {
 	return formatter.FormatArray(result), nil
 }
 
-func (s *Server) handleFlushAll(cmd Command) ([]byte, error) {
-	err := s.store.Clear()
+func (s *Server) handleFlushAll(clientConn *ClientConn, cmd Command) ([]byte, error) {
+	store := s.getActiveStore(clientConn)
+	err := store.Clear()
 	if err != nil {
 		return nil, fmt.Errorf("failed to clear store: %w", err)
 	}
@@ -623,10 +658,49 @@ func (s *Server) handleFlushAll(cmd Command) ([]byte, error) {
 	return formatter.FormatSimpleString("OK"), nil
 }
 
-func (s *Server) handleDBSize(cmd Command) ([]byte, error) {
-	size := s.store.Size() // BasicStore.Size() returns uint64
+func (s *Server) handleDBSize(clientConn *ClientConn, cmd Command) ([]byte, error) {
+	store := s.getActiveStore(clientConn)
+	size := store.Size() // BasicStore.Size() returns uint64
 	formatter := NewFormatter()
 	return formatter.FormatInteger(int64(size)), nil
+}
+
+// handleSelect switches the connection to a different store (SELECT <store_name>)
+func (s *Server) handleSelect(clientConn *ClientConn, cmd Command) ([]byte, error) {
+	if len(cmd.Args) != 1 {
+		return nil, fmt.Errorf("wrong number of arguments for SELECT")
+	}
+
+	storeName := cmd.Args[0]
+
+	if s.storeManager == nil {
+		return nil, fmt.Errorf("multi-store not enabled")
+	}
+
+	if s.storeManager.GetStore(storeName) == nil {
+		return nil, fmt.Errorf("ERR store '%s' not found", storeName)
+	}
+
+	clientConn.selectedStore = storeName
+
+	formatter := NewFormatter()
+	return formatter.FormatSimpleString("OK"), nil
+}
+
+// handleStores lists all available stores (STORES)
+func (s *Server) handleStores(cmd Command) ([]byte, error) {
+	formatter := NewFormatter()
+
+	if s.storeManager == nil {
+		return formatter.FormatBulkString("default"), nil
+	}
+
+	stores := s.storeManager.ListStores()
+	result := make([][]byte, len(stores))
+	for i, name := range stores {
+		result[i] = formatter.FormatBulkString(name)
+	}
+	return formatter.FormatArray(result), nil
 }
 
 // connectionCleaner periodically cleans up idle connections

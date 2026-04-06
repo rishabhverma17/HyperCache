@@ -42,36 +42,46 @@ persistence:
 # Global Cache Configuration
 cache:
   max_memory: "8GB"
-  default_ttl: "1h"
-  cuckoo_filter_fpp: 0.01  # 1% false positive rate
+  default_ttl: "0"            # 0 = infinite (no expiry); user sets TTL per-store or per-key
+  cuckoo_filter_fpp: 0.01     # 1% false positive rate
+  max_stores: 16              # Maximum stores allowed (1-64)
 
-# Store Configurations - The Innovation!
-# Each store can have different eviction policies
+# Store Configurations
+# Only "default" ships out of the box. Create additional stores via API or config.
+# Store config is immutable after creation — to change, drop and recreate.
+#
+# Environment variable overrides (highest priority, for Docker/K8s):
+#   HYPERCACHE_DEFAULT_MEMORY=4GB        → default store max_memory
+#   HYPERCACHE_DEFAULT_TTL=0             → default store TTL (0 = infinite)
+#   HYPERCACHE_DEFAULT_EVICTION=lru      → default store eviction policy
+#   HYPERCACHE_DEFAULT_CUCKOO=true       → default store cuckoo filter toggle
+#   HYPERCACHE_MAX_STORES=16             → max stores allowed
+#   HYPERCACHE_CUCKOO_FILTER_FPP=0.01   → global cuckoo filter false positive rate
+#   HYPERCACHE_PERSISTENCE_ENABLED=true  → global persistence toggle
+#   HYPERCACHE_PERSISTENCE_STRATEGY=hybrid → global persistence strategy
+#
 stores:
   - name: "default"
     eviction_policy: "lru"
-    max_memory: "4GB"
-    default_ttl: "1h"
-    
-  - name: "sessions"
-    eviction_policy: "ttl"
-    max_memory: "1GB" 
-    default_ttl: "30m"
-    
-  - name: "hot_data"
-    eviction_policy: "lru"
-    max_memory: "2GB"
-    default_ttl: "2h"
-    
-  - name: "analytics"
-    eviction_policy: "lfu"
-    max_memory: "512MB"
-    default_ttl: "24h"
-    
-  - name: "bulk_cache"
-    eviction_policy: "fifo"
-    max_memory: "512MB"
-    default_ttl: "6h"
+    max_memory: "8GB"
+    default_ttl: "0"              # 0 = infinite
+    cuckoo_filter: true           # enable probabilistic lookups
+    persistence: "hybrid"         # "hybrid", "aof", "snapshot", "disabled"
+
+  # Example: uncomment to pre-create additional stores at startup
+  # - name: "sessions"
+  #   eviction_policy: "ttl"
+  #   max_memory: "1GB"
+  #   default_ttl: "30m"
+  #   cuckoo_filter: true
+  #   persistence: "aof"
+  #
+  # - name: "temp_cache"
+  #   eviction_policy: "lfu"
+  #   max_memory: "512MB"
+  #   default_ttl: "15m"
+  #   cuckoo_filter: false
+  #   persistence: "disabled"
 
 # Logging Configuration
 logging:

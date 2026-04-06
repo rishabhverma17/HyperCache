@@ -7,12 +7,18 @@ import (
 
 	"hypercache/internal/cache"
 	"hypercache/internal/logging"
+	"hypercache/internal/persistence"
 )
 
 // StartPersistence initializes and starts the persistence engine
 func (s *BasicStore) StartPersistence(ctx context.Context) error {
 	if s.persistEngine == nil {
 		return nil // No persistence configured
+	}
+
+	// Wire snapshot data callback so background workers can access cache data
+	if he, ok := s.persistEngine.(*persistence.HybridEngine); ok {
+		he.SetSnapshotDataFunc(s.getSnapshotData)
 	}
 
 	if err := s.persistEngine.Start(ctx); err != nil {
@@ -25,6 +31,23 @@ func (s *BasicStore) StartPersistence(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// getSnapshotData returns current cache data for snapshot/compaction use.
+// Thread-safe: acquires read lock.
+func (s *BasicStore) getSnapshotData() map[string]interface{} {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	data := make(map[string]interface{}, len(s.items))
+	for key, item := range s.items {
+		value, err := item.GetValue()
+		if err != nil {
+			continue
+		}
+		data[key] = value
+	}
+	return data
 }
 
 // StopPersistence gracefully stops the persistence engine
@@ -96,7 +119,9 @@ func (s *BasicStore) recoverFromPersistence() error {
 	for _, entry := range entries {
 		switch entry.Operation {
 		case "SET":
-			// Deserialize the value - for simplicity, assume it's a string
+			// AOF stores values as raw bytes without type info.
+			// Convert to string for recovery — this matches the original write path
+			// where most values come in as strings from RESP/HTTP.
 			value := string(entry.Value)
 
 			// Calculate TTL from entry
