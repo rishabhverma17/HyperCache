@@ -74,13 +74,23 @@ open http://localhost:3000  # admin / admin123
 - Go 1.23.2+
 - `redis-cli` (optional, for RESP testing)
 
-### Local Cluster (3 nodes)
+### Local Cluster (N nodes)
 ```bash
-# Build and start a fresh 3-node cluster
+# Start a 3-node cluster (default)
 make cluster
+
+# Start a 5-node cluster
+make cluster NODES=5
+
+# Start a 10-node cluster
+make cluster NODES=10
 
 # Check cluster health
 curl -s http://localhost:9080/health | python3 -m json.tool
+
+# Add a node to a running cluster (auto-discovers ports and seeds)
+./scripts/add-node.sh
+./scripts/add-node.sh --node-name=node-6
 
 # Stop the cluster
 make cluster-stop
@@ -102,6 +112,13 @@ docker pull rishabhverma17/hypercache:latest
 # Start full stack (3-node cluster + Elasticsearch + Grafana + Filebeat)
 docker compose -f docker-compose.cluster.yml up -d
 
+# Add a 4th node to a running Docker cluster (auto-joins via gossip)
+docker run -d --name hypercache-node4 \
+  --network cache_hypercache-cluster \
+  -p 8083:8080 -p 9083:9080 \
+  rishabhverma17/hypercache:latest \
+  --protocol resp --node-id node-4
+
 # Or build locally and start
 make docker-build && make docker-up
 
@@ -111,21 +128,27 @@ docker compose -f docker-compose.cluster.yml down
 
 ### Kubernetes
 ```bash
+# Deploy a 3-node cluster
 kubectl apply -f k8s/hypercache-cluster.yaml
+
+# Scale to 5 nodes
+kubectl scale statefulset hypercache -n hypercache --replicas=5
+
+# Check cluster
+kubectl get pods -n hypercache
+kubectl exec -n hypercache hypercache-0 -- wget -qO- http://localhost:9080/health
 ```
 
 ### 📊 Access Points
 | Service | URL | Notes |
 |---------|-----|-------|
-| Node 1 HTTP API | http://localhost:9080 | Health, cache, filter, metrics |
-| Node 2 HTTP API | http://localhost:9081 | |
-| Node 3 HTTP API | http://localhost:9082 | |
-| Node 1 RESP | `redis-cli -p 8080` | Redis-compatible |
-| Node 2 RESP | `redis-cli -p 8081` | |
-| Node 3 RESP | `redis-cli -p 8082` | |
+| Node N HTTP API | http://localhost:9079+N | Health, cache, stores, filter, metrics |
+| Node N RESP | `redis-cli -p 8079+N` | Redis-compatible |
 | Prometheus Metrics | http://localhost:9080/metrics | Per-node metrics |
 | Grafana | http://localhost:3000 | admin / admin123 |
 | Elasticsearch | http://localhost:9200 | |
+
+Default 3-node cluster: HTTP on 9080/9081/9082, RESP on 8080/8081/8082.
 
 ## 🧪 **Testing**
 
@@ -151,18 +174,39 @@ health, metrics, CRUD, cross-node replication, delete replication, value types, 
 
 ### HTTP API Examples
 ```bash
-# Store a key
+# --- Default store (backward-compatible) ---
 curl -X PUT http://localhost:9080/api/cache/mykey \
   -H "Content-Type: application/json" \
   -d '{"value": "hello world"}'
 
-# Retrieve it
 curl http://localhost:9080/api/cache/mykey
-
-# Delete it
 curl -X DELETE http://localhost:9080/api/cache/mykey
 
-# Check Cuckoo filter stats
+# --- Multi-store APIs ---
+
+# List all stores
+curl http://localhost:9080/api/stores
+
+# Create a new store (config is immutable after creation)
+curl -X POST http://localhost:9080/api/stores \
+  -H "Content-Type: application/json" \
+  -d '{"name":"sessions","eviction_policy":"ttl","max_memory":"1GB","default_ttl":"30m","cuckoo_filter":true,"persistence":"aof"}'
+
+# Get store info and stats
+curl http://localhost:9080/api/stores/sessions
+
+# Write to a specific store
+curl -X PUT http://localhost:9080/api/stores/sessions/cache/user:123 \
+  -H "Content-Type: application/json" \
+  -d '{"value": {"token":"abc","role":"admin"}}'
+
+# Read from a specific store
+curl http://localhost:9080/api/stores/sessions/cache/user:123
+
+# Drop a store (cannot drop "default")
+curl -X DELETE http://localhost:9080/api/stores/sessions
+
+# Cuckoo filter stats
 curl http://localhost:9080/api/filter/stats
 
 # Prometheus metrics
@@ -177,24 +221,45 @@ redis-cli -p 8081 GET foo   # verify replication
 redis-cli -p 8080 DEL foo
 redis-cli -p 8080 INFO
 redis-cli -p 8080 DBSIZE
+
+# Multi-store commands
+redis-cli -p 8080 STORES             # list all stores
+redis-cli -p 8080 SELECT sessions    # switch to "sessions" store
+redis-cli -p 8080 SET user:123 token # writes to "sessions" store
+redis-cli -p 8080 SELECT default     # switch back
 ```
+
+### Scenario Tests
+Real-world pattern tests that run on every push and daily:
+```bash
+# Run all scenario tests
+go test -v -race ./tests/scenarios/...
+
+# Reproduce a randomized test that failed in CI
+SCENARIO_SEED=1712438400 go test -run TestRandomizedMixedWorkload ./tests/scenarios/...
+```
+
+**Deterministic** (same every run): session overflow, concurrent read/write, TTL expiry, persistence recovery, store lifecycle, hot key thundering herd.
+
+**Randomized** (seed-based, different each run): mixed workload, burst writes, concurrent multi-store.
 
 ### Makefile Reference
 ```
-make build           Build the binary
-make run             Run single node (RESP)
-make cluster         Start 3-node local cluster
-make cluster-stop    Stop all HyperCache processes
-make clean           Remove binaries, logs, data
-make test-unit       Run unit tests with coverage
-make test-integration Run integration tests
-make bench           Run benchmarks
-make lint            Run golangci-lint
-make fmt             Format code
-make docker-build    Build Docker image
-make docker-up       Start Docker stack
-make docker-down     Stop Docker stack
-make deps            Download and tidy dependencies
+make build              Build the binary
+make run                Run single node (RESP)
+make cluster            Start N-node cluster (default 3)
+make cluster NODES=5    Start 5-node cluster
+make cluster-stop       Stop all HyperCache processes
+make clean              Remove binaries, logs, data
+make test-unit          Run unit tests with coverage
+make test-integration   Run integration tests
+make bench              Run benchmarks
+make lint               Run golangci-lint
+make fmt                Format code
+make docker-build       Build Docker image
+make docker-up          Start Docker stack
+make docker-down        Stop Docker stack
+make deps               Download and tidy dependencies
 ```
 
 ## 🏆 **Key Features**
@@ -204,6 +269,7 @@ make deps            Download and tidy dependencies
 - Works with any Redis client library
 - Drop-in replacement for many Redis use cases
 - Standard commands: GET, SET, DEL, EXISTS, PING, INFO, FLUSHALL, DBSIZE
+- Multi-store commands: SELECT, STORES
 
 ### **Distributed Resilience**
 - **Full Replication**: Every node stores every key — maximum availability, any node serves any request
@@ -224,8 +290,18 @@ make deps            Download and tidy dependencies
 ### **Containerized Deployment**
 - **Docker Hub Integration**: Pre-built multi-arch images (amd64, arm64)
 - **Docker Compose Support**: One-command cluster deployment with monitoring
+- **Scalable Clusters**: `make cluster NODES=N` for local, `kubectl scale` for K8s
+- **Dynamic Node Addition**: Add nodes to a running cluster — gossip handles join
 - **Kubernetes Ready**: StatefulSet manifests with service discovery
 - **CI/CD Pipeline**: GitHub Actions for lint, test, build, and publish
+
+### **Multi-Store Architecture**
+- **Named Stores**: Create independent stores with different configs (LRU, LFU, TTL, FIFO)
+- **Per-Store Isolation**: Independent memory limits, eviction policies, TTL, persistence, cuckoo filters
+- **Runtime Management**: Create/drop stores via HTTP API or RESP `SELECT` command
+- **Immutable Config**: Store settings are set once at creation — drop and recreate to change
+- **Store Registry**: Runtime-created stores survive restarts (`stores.json` persistence)
+- **Environment Variable Config**: 8 env vars for Docker/K8s — no YAML needed
 
 ### **Advanced Memory Management**
 - **Per-Store Eviction Policies**: Independent LRU, LFU, or session-based eviction per store
