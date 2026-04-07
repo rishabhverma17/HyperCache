@@ -31,8 +31,9 @@ persistence:
 
 cache:
   max_memory: "8GB"
-  default_ttl: "1h"
+  default_ttl: "0"
   cuckoo_filter_fpp: 0.01
+  max_stores: 16
 
 storage:
   wal_sync_interval: "10ms"
@@ -42,16 +43,10 @@ storage:
 stores:
   - name: "default"
     eviction_policy: "lru"
-    max_memory: "4GB"
-    default_ttl: "1h"
-  - name: "sessions"
-    eviction_policy: "ttl"
-    max_memory: "1GB"
-    default_ttl: "30m"
-  - name: "analytics"
-    eviction_policy: "lfu"
-    max_memory: "2GB"
-    default_ttl: "24h"
+    max_memory: "8GB"
+    default_ttl: "0"
+    cuckoo_filter: true
+    persistence: "hybrid"
 
 # Logging Configuration
 logging:

@@ -58,22 +58,42 @@ clean:
 	rm -rf bin/ test-results/ logs/ data/
 	rm -f main hypercache
 
-## cluster: Start a local 3-node cluster
+## cluster: Start a local N-node cluster (default: NODES=3)
+##   Usage: make cluster NODES=5
 cluster: build
-	@mkdir -p logs data/node-1 data/node-2 data/node-3
-	@echo "Starting node-1..."
-	./$(BINARY) -protocol resp -config configs/node1-config.yaml > logs/node-1.log 2>&1 &
-	@sleep 2
-	@echo "Starting node-2..."
-	./$(BINARY) -protocol resp -config configs/node2-config.yaml > logs/node-2.log 2>&1 &
-	@sleep 2
-	@echo "Starting node-3..."
-	./$(BINARY) -protocol resp -config configs/node3-config.yaml > logs/node-3.log 2>&1 &
-	@sleep 3
-	@echo "Cluster started. Health checks:"
-	@curl -s http://localhost:9080/health | head -1 || echo "node-1: not ready"
-	@curl -s http://localhost:9081/health | head -1 || echo "node-2: not ready"
-	@curl -s http://localhost:9082/health | head -1 || echo "node-3: not ready"
+	@NODES=$${NODES:-3}; \
+	mkdir -p logs; \
+	SEEDS=""; \
+	for i in $$(seq 1 $$NODES); do \
+		GOSSIP=$$((7945 + $$i)); \
+		if [ -n "$$SEEDS" ]; then SEEDS="$$SEEDS,"; fi; \
+		SEEDS="$${SEEDS}\"127.0.0.1:$$GOSSIP\""; \
+	done; \
+	for i in $$(seq 1 $$NODES); do \
+		NODE_ID="node-$$i"; \
+		RESP_PORT=$$((8079 + $$i)); \
+		HTTP_PORT=$$((9079 + $$i)); \
+		GOSSIP_PORT=$$((7945 + $$i)); \
+		DATA_DIR="data/$$NODE_ID"; \
+		mkdir -p "$$DATA_DIR"; \
+		CFG="/tmp/hypercache-$$NODE_ID.yaml"; \
+		sed -e "s/\$${NODE_ID}/$$NODE_ID/g" \
+		    -e "s/\$${RESP_PORT}/$$RESP_PORT/g" \
+		    -e "s/\$${HTTP_PORT}/$$HTTP_PORT/g" \
+		    -e "s/\$${GOSSIP_PORT}/$$GOSSIP_PORT/g" \
+		    -e "s|\$${CLUSTER_SEEDS}|$$SEEDS|g" \
+		    -e "s/\$${LOG_LEVEL}/info/g" \
+		    templates/node-config.yaml.template > "$$CFG"; \
+		echo "Starting $$NODE_ID (RESP=$$RESP_PORT HTTP=$$HTTP_PORT Gossip=$$GOSSIP_PORT)..."; \
+		./$(BINARY) -protocol resp -config "$$CFG" > "logs/$$NODE_ID.log" 2>&1 & \
+		sleep 2; \
+	done; \
+	sleep 2; \
+	echo "Cluster health checks:"; \
+	for i in $$(seq 1 $$NODES); do \
+		HTTP_PORT=$$((9079 + $$i)); \
+		curl -s "http://localhost:$$HTTP_PORT/health" | head -1 || echo "node-$$i: not ready"; \
+	done
 
 ## cluster-stop: Stop all local HyperCache processes
 cluster-stop:
