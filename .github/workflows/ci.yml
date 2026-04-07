@@ -51,7 +51,13 @@ jobs:
     - name: Run unit tests with coverage
       run: |
         mkdir -p test-results
-        go test -v -race -coverprofile=test-results/coverage.out -covermode=atomic -coverpkg=./internal/...,./pkg/...,./cmd/... -timeout=5m ./tests/unit/... ./internal/... ./pkg/...
+        # Run each test path separately to avoid coverprofile "File exists" conflicts
+        go test -v -race -coverprofile=test-results/unit.out -covermode=atomic -coverpkg=./internal/...,./pkg/...,./cmd/... -timeout=5m ./tests/unit/...
+        go test -v -race -coverprofile=test-results/internal.out -covermode=atomic -coverpkg=./internal/...,./pkg/...,./cmd/... -timeout=5m ./internal/...
+        go test -v -race -coverprofile=test-results/pkg.out -covermode=atomic -coverpkg=./internal/...,./pkg/...,./cmd/... -timeout=5m ./pkg/...
+        # Merge coverage profiles
+        head -1 test-results/unit.out > test-results/coverage.out
+        tail -n +2 -q test-results/unit.out test-results/internal.out test-results/pkg.out >> test-results/coverage.out
         echo "✅ Unit tests completed"
 
     - name: Check test coverage
