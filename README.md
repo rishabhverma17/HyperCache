@@ -128,15 +128,30 @@ docker compose -f docker-compose.cluster.yml down
 
 ### Kubernetes
 ```bash
-# Deploy a 3-node cluster
-kubectl apply -f k8s/hypercache-cluster.yaml
+# Prerequisites: minikube (brew install minikube) + kubectl (brew install kubectl)
 
-# Scale to 5 nodes
-kubectl scale statefulset hypercache -n hypercache --replicas=5
+# Start Minikube
+minikube start
 
-# Check cluster
-kubectl get pods -n hypercache
-kubectl exec -n hypercache hypercache-0 -- wget -qO- http://localhost:9080/health
+# Deploy full stack (HyperCache + Elasticsearch + Filebeat + Grafana)
+make k8s-up
+# or: kubectl apply -f k8s/
+
+# Check cluster status
+make k8s-status
+
+# Scale to 5 nodes (or use Minikube Dashboard UI)
+make k8s-scale NODES=5
+
+# Open dashboards
+make k8s-dashboard    # Kubernetes Dashboard (pods, scaling, logs)
+make k8s-grafana      # Grafana (same dashboards as Docker — admin/admin123)
+
+# View logs
+make k8s-logs
+
+# Tear down
+make k8s-down
 ```
 
 ### 📊 Access Points
@@ -259,6 +274,13 @@ make fmt                Format code
 make docker-build       Build Docker image
 make docker-up          Start Docker stack
 make docker-down        Stop Docker stack
+make k8s-up             Deploy to Kubernetes (full stack)
+make k8s-down           Remove from Kubernetes
+make k8s-scale NODES=5  Scale to N replicas
+make k8s-status         Show K8s pod/service status
+make k8s-dashboard      Open Minikube dashboard
+make k8s-grafana        Open Grafana (K8s)
+make k8s-logs           Tail HyperCache pod logs
 make deps               Download and tidy dependencies
 ```
 

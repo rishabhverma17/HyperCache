@@ -1,0 +1,241 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: hypercache
+  labels:
+    app: grafana
+data:
+  health-dashboard.json: |
+    {
+      "editable": true,
+      "panels": [
+        {
+          "title": "Total Logs",
+          "type": "stat",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+          "targets": [{ "query": "container.name:hypercache-node*", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+          "options": { "reduceOptions": { "calcs": ["sum"] } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
+        },
+        {
+          "title": "Errors",
+          "type": "stat",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+          "targets": [{ "query": "container.name:hypercache-node* AND message:\"level\\\":\\\"ERROR\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+          "options": { "reduceOptions": { "calcs": ["sum"] } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } }
+        },
+        {
+          "title": "Cache Ops",
+          "type": "stat",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+          "targets": [{ "query": "container.name:hypercache-node* AND (message:\"Cache SET operation\" OR message:\"Cache GET operation\" OR message:\"Cache DELETE operation\")", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+          "options": { "reduceOptions": { "calcs": ["sum"] } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "blue", "value": null }] } } }
+        },
+        {
+          "title": "Replications",
+          "type": "stat",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+          "targets": [{ "query": "container.name:hypercache-node* AND message:\"replication\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp" }],
+          "options": { "reduceOptions": { "calcs": ["sum"] } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "purple", "value": null }] } } }
+        },
+        {
+          "title": "Log Volume Over Time",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 5 },
+          "targets": [{ "query": "container.name:hypercache-node*", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp" }]
+        },
+        {
+          "title": "Logs by Node",
+          "type": "piechart",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 13 },
+          "targets": [
+            { "refId": "A", "query": "container.name:hypercache-node1", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 1" },
+            { "refId": "B", "query": "container.name:hypercache-node2", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 2" },
+            { "refId": "C", "query": "container.name:hypercache-node3", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 3" }
+          ],
+          "options": { "reduceOptions": { "calcs": ["sum"] }, "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "title": "Operations Over Time",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 16, "x": 8, "y": 13 },
+          "targets": [
+            { "refId": "A", "query": "container.name:hypercache-node* AND message:\"Cache PUT operation started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "SET" },
+            { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Cache GET operation started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "GET" },
+            { "refId": "C", "query": "container.name:hypercache-node* AND message:\"Cache DELETE operation started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "DELETE" }
+          ]
+        },
+        {
+          "title": "Recent Logs",
+          "type": "logs",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 21 },
+          "targets": [{ "query": "container.name:hypercache-node*", "metrics": [{ "type": "logs", "id": "1" }], "timeField": "@timestamp" }],
+          "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["hypercache"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "HyperCache Health Dashboard",
+      "uid": "hypercache-health-v3"
+    }
+  performance-metrics.json: |
+    {
+      "editable": true,
+      "panels": [
+        {
+          "title": "HTTP Request Rate",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "query": "message:\"HTTP request started\" AND container.name:hypercache-node1", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "Node 1" },
+            { "query": "message:\"HTTP request started\" AND container.name:hypercache-node2", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "Node 2" },
+            { "query": "message:\"HTTP request started\" AND container.name:hypercache-node3", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "Node 3" }
+          ]
+        },
+        {
+          "title": "Response Status Codes",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            { "query": "container.name:hypercache-node* AND message:status_code AND message:200", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "200 OK" },
+            { "query": "container.name:hypercache-node* AND message:status_code AND message:404", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "404 Not Found" },
+            { "query": "container.name:hypercache-node* AND message:status_code AND message:400", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp", "alias": "400 Bad Request" }
+          ]
+        },
+        {
+          "title": "Cache Hit vs Miss",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            { "refId": "A", "query": "message:\"GET operation successful\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Cache Hit" },
+            { "refId": "B", "query": "message:\"Cache miss\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Cache Miss" }
+          ]
+        },
+        {
+          "title": "Replication Throughput",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            { "refId": "A", "query": "message:\"Successfully applied replicated SET\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "SET Replicated" },
+            { "refId": "B", "query": "message:\"Successfully applied replicated DELETE\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "DELETE Replicated" }
+          ]
+        },
+        {
+          "title": "Total Requests by Node",
+          "type": "piechart",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+          "targets": [
+            { "refId": "A", "query": "message:\"HTTP request started\" AND container.name:hypercache-node1", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 1" },
+            { "refId": "B", "query": "message:\"HTTP request started\" AND container.name:hypercache-node2", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 2" },
+            { "refId": "C", "query": "message:\"HTTP request started\" AND container.name:hypercache-node3", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Node 3" }
+          ],
+          "options": { "reduceOptions": { "calcs": ["sum"] }, "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "title": "Replication Success vs Failure",
+          "type": "piechart",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+          "targets": [
+            { "refId": "A", "query": "message:\"Successfully applied replicated\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Success" },
+            { "refId": "B", "query": "message:\"Failed to apply replicated\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "Failed" }
+          ],
+          "options": { "reduceOptions": { "calcs": ["sum"] }, "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "title": "HTTP Methods (PUT/GET/DELETE)",
+          "type": "piechart",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+          "targets": [
+            { "refId": "A", "query": "message:\"HTTP request started\" AND message:PUT", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "PUT" },
+            { "refId": "B", "query": "message:\"HTTP request started\" AND message:GET AND NOT message:health", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "GET" },
+            { "refId": "C", "query": "message:\"HTTP request started\" AND message:DELETE", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "auto" } }], "timeField": "@timestamp", "alias": "DELETE" }
+          ],
+          "options": { "reduceOptions": { "calcs": ["sum"] }, "legend": { "displayMode": "list", "placement": "bottom" } }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["hypercache", "performance"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "HyperCache Performance Metrics",
+      "uid": "hypercache-perf-v2"
+    }
+  system-components.json: |
+    {
+      "editable": true,
+      "panels": [
+        {
+          "title": "HTTP Requests Over Time",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "targets": [{ "query": "container.name:hypercache-node* AND message:\"HTTP request started\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "10s" } }], "timeField": "@timestamp" }]
+        },
+        {
+          "title": "Cuckoo Filter Activity",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            { "refId": "A", "query": "container.name:hypercache-node* AND message:\"added to cuckoo filter\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Filter Add" },
+            { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Cuckoo filter early rejection\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Filter Reject" }
+          ]
+        },
+        {
+          "title": "Gossip / Cluster Events",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            { "refId": "A", "query": "container.name:hypercache-node* AND message:\"Node joined\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Node Join" },
+            { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Node left\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Node Left" },
+            { "refId": "C", "query": "container.name:hypercache-node* AND message:\"Node failed\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Node Failed" }
+          ]
+        },
+        {
+          "title": "Persistence Activity",
+          "type": "timeseries",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "targets": [
+            { "refId": "A", "query": "container.name:hypercache-node* AND message:\"AOF replay\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "AOF" },
+            { "refId": "B", "query": "container.name:hypercache-node* AND message:\"Snapshot created\"", "metrics": [{ "type": "count", "id": "1" }], "bucketAggs": [{ "type": "date_histogram", "field": "@timestamp", "id": "2", "settings": { "interval": "30s" } }], "timeField": "@timestamp", "alias": "Snapshot" }
+          ]
+        },
+        {
+          "title": "Errors & Warnings",
+          "type": "logs",
+          "datasource": "HyperCache Logs",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "targets": [{ "query": "container.name:hypercache-node* AND (message:\"level\\\":\\\"ERROR\" OR message:\"level\\\":\\\"WARN\")", "metrics": [{ "type": "logs", "id": "1" }], "timeField": "@timestamp" }],
+          "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["hypercache"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "HyperCache System Components",
+      "uid": "hypercache-system-v3"
+    }

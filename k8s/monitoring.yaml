@@ -1,0 +1,349 @@
+# HyperCache Monitoring Stack for Kubernetes
+# Deploys: Elasticsearch + Filebeat + Grafana with pre-configured dashboards
+#
+# Apply after hypercache-cluster.yaml:
+#   kubectl apply -f k8s/
+
+# =============================================================================
+# Elasticsearch — log storage
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: hypercache
+  labels:
+    app: elasticsearch
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+      - name: elasticsearch
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+        env:
+        - name: discovery.type
+          value: single-node
+        - name: ES_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        - name: xpack.security.enabled
+          value: "false"
+        - name: xpack.security.enrollment.enabled
+          value: "false"
+        - name: xpack.security.http.ssl.enabled
+          value: "false"
+        - name: xpack.security.transport.ssl.enabled
+          value: "false"
+        ports:
+        - containerPort: 9200
+          name: http
+        - containerPort: 9300
+          name: transport
+        volumeMounts:
+        - name: es-data
+          mountPath: /usr/share/elasticsearch/data
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        readinessProbe:
+          httpGet:
+            path: /_cluster/health
+            port: 9200
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /_cluster/health
+            port: 9200
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: es-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: hypercache
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+  - name: http
+    port: 9200
+    targetPort: 9200
+  - name: transport
+    port: 9300
+    targetPort: 9300
+---
+# =============================================================================
+# Filebeat ConfigMap
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: hypercache
+data:
+  filebeat.yml: |
+    filebeat.inputs:
+    - type: container
+      enabled: true
+      paths:
+        - '/var/log/containers/hypercache-*.log'
+      json.keys_under_root: true
+      json.add_error_key: true
+      fields:
+        hypercache_service: hypercache
+        environment: kubernetes
+        log_type: container
+      fields_under_root: true
+
+    processors:
+    - add_kubernetes_metadata:
+        host: ${NODE_NAME}
+        matchers:
+        - logs_path:
+            logs_path: "/var/log/containers/"
+
+    output.elasticsearch:
+      hosts: ['http://elasticsearch.hypercache.svc.cluster.local:9200']
+      index: "hypercache-logs-%{+yyyy.MM.dd}"
+
+    setup.template.name: "hypercache-logs"
+    setup.template.pattern: "hypercache-logs-*"
+    setup.ilm.enabled: false
+
+    logging.level: warning
+    logging.to_stderr: true
+---
+# =============================================================================
+# Filebeat DaemonSet — runs on every node, ships logs to Elasticsearch
+# =============================================================================
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: filebeat
+  namespace: hypercache
+  labels:
+    app: filebeat
+spec:
+  selector:
+    matchLabels:
+      app: filebeat
+  template:
+    metadata:
+      labels:
+        app: filebeat
+    spec:
+      serviceAccountName: filebeat
+      containers:
+      - name: filebeat
+        image: docker.elastic.co/beats/filebeat:8.11.0
+        args: ["-c", "/etc/filebeat/filebeat.yml", "-e"]
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: config
+          mountPath: /etc/filebeat
+          readOnly: true
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: containerlog
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: config
+        configMap:
+          name: filebeat-config
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: containerlog
+        hostPath:
+          path: /var/lib/docker/containers
+---
+# Filebeat ServiceAccount + RBAC (needs access to K8s API for metadata)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: filebeat
+  namespace: hypercache
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: filebeat
+rules:
+- apiGroups: [""]
+  resources: ["namespaces", "pods", "nodes"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: filebeat
+subjects:
+- kind: ServiceAccount
+  name: filebeat
+  namespace: hypercache
+roleRef:
+  kind: ClusterRole
+  name: filebeat
+  apiGroup: rbac.authorization.k8s.io
+---
+# =============================================================================
+# Grafana ConfigMaps — datasource + dashboard provisioning
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: hypercache
+data:
+  elasticsearch.yml: |
+    apiVersion: 1
+    datasources:
+      - name: HyperCache Logs
+        type: elasticsearch
+        access: proxy
+        url: http://elasticsearch.hypercache.svc.cluster.local:9200
+        database: "hypercache-logs-*"
+        isDefault: true
+        jsonData:
+          interval: Daily
+          timeField: "@timestamp"
+          esVersion: "8.11.0"
+          maxConcurrentShardRequests: 5
+          logMessageField: "message"
+          logLevelField: "level"
+        readOnly: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: hypercache
+data:
+  dashboard.yml: |
+    apiVersion: 1
+    providers:
+      - name: 'default'
+        orgId: 1
+        folder: 'HyperCache'
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+# =============================================================================
+# Grafana Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: hypercache
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:10.2.0
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "admin123"
+        - name: GF_PATHS_PROVISIONING
+          value: "/etc/grafana/provisioning"
+        ports:
+        - containerPort: 3000
+          name: http
+        volumeMounts:
+        - name: datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: dashboard-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: dashboards
+          mountPath: /var/lib/grafana/dashboards
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: datasources
+        configMap:
+          name: grafana-datasources
+      - name: dashboard-provider
+        configMap:
+          name: grafana-dashboard-provider
+      - name: dashboards
+        configMap:
+          name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: hypercache
+  labels:
+    app: grafana
+spec:
+  selector:
+    app: grafana
+  type: NodePort
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000

@@ -116,6 +116,39 @@ docker-down:
 docker-logs:
 	docker compose -f docker-compose.cluster.yml logs -f --tail=50
 
+## k8s-up: Deploy to Kubernetes (Minikube)
+k8s-up:
+	kubectl apply -f k8s/
+	@echo "Waiting for pods..."
+	@kubectl wait --for=condition=ready pod -l app=hypercache -n hypercache --timeout=120s 2>/dev/null || true
+	@echo "Cluster status:"
+	@kubectl get pods -n hypercache
+
+## k8s-down: Remove from Kubernetes
+k8s-down:
+	kubectl delete -f k8s/ --ignore-not-found
+
+## k8s-scale: Scale HyperCache replicas (usage: make k8s-scale NODES=5)
+k8s-scale:
+	kubectl scale statefulset hypercache -n hypercache --replicas=$${NODES:-3}
+	@echo "Scaled to $${NODES:-3} replicas"
+
+## k8s-status: Show K8s cluster status
+k8s-status:
+	@kubectl get pods,svc -n hypercache
+
+## k8s-logs: Tail HyperCache pod logs
+k8s-logs:
+	kubectl logs -f -l app=hypercache -n hypercache --max-log-requests=10 --tail=50
+
+## k8s-dashboard: Open Minikube dashboard
+k8s-dashboard:
+	minikube dashboard &
+
+## k8s-grafana: Open Grafana in browser (Minikube)
+k8s-grafana:
+	minikube service grafana -n hypercache
+
 ## deps: Download and verify dependencies
 deps:
 	$(GO) mod download
