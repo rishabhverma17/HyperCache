@@ -141,8 +141,18 @@ spec:
       - name: wait-for-seed
         image: busybox:1.36
         command: ['sh', '-c']
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         args:
         - |
+          # hypercache-0 IS the seed — skip waiting for itself
+          if [ "$POD_NAME" = "hypercache-0" ]; then
+            echo "I am the seed node, starting immediately"
+            exit 0
+          fi
           echo "Waiting for seed node DNS..."
           until nslookup hypercache-0.hypercache-headless.hypercache.svc.cluster.local; do
             sleep 2
@@ -151,18 +161,20 @@ spec:
       containers:
       - name: hypercache
         image: rishabhverma17/hypercache:latest
-        command: ["/hypercache"]
-        args: ["--config", "/config/hypercache.yaml", "--protocol", "resp"]
+        command: ['sh', '-c']
+        args:
+        - |
+          # Substitute env vars in config template
+          sed -e "s/\${NODE_ID}/$POD_NAME/g" \
+              -e "s/\${POD_IP}/$POD_IP/g" \
+              /config/hypercache.yaml > /tmp/hypercache.yaml
+          exec /hypercache --config /tmp/hypercache.yaml --protocol resp --node-id "$POD_NAME"
         env:
         - name: POD_IP
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
         - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: NODE_ID
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
