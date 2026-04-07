@@ -143,8 +143,13 @@ make k8s-status
 # Scale to 5 nodes (or use Minikube Dashboard UI)
 make k8s-scale NODES=5
 
+# Access HyperCache from your machine
+kubectl port-forward -n hypercache svc/hypercache 9080:9080 8080:8080
+# Then: curl http://localhost:9080/health
+# Then: redis-cli -p 8080 PING
+
 # Open dashboards
-make k8s-dashboard    # Kubernetes Dashboard (pods, scaling, logs)
+make k8s-dashboard    # Kubernetes Dashboard (select "hypercache" namespace)
 make k8s-grafana      # Grafana (same dashboards as Docker — admin/admin123)
 
 # View logs
@@ -155,6 +160,8 @@ make k8s-down
 ```
 
 ### 📊 Access Points
+
+**Local / Docker:**
 | Service | URL | Notes |
 |---------|-----|-------|
 | Node N HTTP API | http://localhost:9079+N | Health, cache, stores, filter, metrics |
@@ -164,6 +171,14 @@ make k8s-down
 | Elasticsearch | http://localhost:9200 | |
 
 Default 3-node cluster: HTTP on 9080/9081/9082, RESP on 8080/8081/8082.
+
+**Kubernetes** (after `kubectl port-forward -n hypercache svc/hypercache 9080:9080 8080:8080`):
+| Service | Access | Notes |
+|---------|--------|-------|
+| HTTP API | http://localhost:9080 | Same APIs as local |
+| RESP | `redis-cli -p 8080` | Same commands as local |
+| Grafana | `make k8s-grafana` | Opens browser via Minikube tunnel |
+| K8s Dashboard | `make k8s-dashboard` | Select "hypercache" namespace |
 
 ## 🧪 **Testing**
 
