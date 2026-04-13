@@ -47,11 +47,29 @@ func (s *BasicStore) getSnapshotData() map[string]interface{} {
 	return data
 }
 
-// StopPersistence gracefully stops the persistence engine
+// StopPersistence gracefully stops the persistence engine.
+// Drains the background AOF channel and flushes buffered writes before stopping.
 func (s *BasicStore) StopPersistence() error {
 	if s.persistEngine == nil {
 		return nil
 	}
+
+	// Drain any pending AOF channel entries to the persistence engine
+	for {
+		select {
+		case entry, ok := <-s.aofChan:
+			if !ok {
+				goto done
+			}
+			_ = s.persistEngine.WriteEntry(entry)
+		default:
+			goto done
+		}
+	}
+done:
+
+	// Flush buffered writes to disk
+	_ = s.persistEngine.Flush()
 
 	return s.persistEngine.Stop()
 }

@@ -22,6 +22,9 @@ type PersistenceEngine interface {
 	Start(ctx context.Context) error
 	Stop() error
 
+	// Flush ensures all buffered writes are persisted to disk
+	Flush() error
+
 	// Maintenance
 	Compact() error
 	GetStats() *PersistenceStats
@@ -450,4 +453,22 @@ func (he *HybridEngine) LoadSnapshot() (map[string]interface{}, error) {
 func (he *HybridEngine) Compact() error {
 	// This will be implemented when we have cache data access
 	return fmt.Errorf("compaction requires cache integration")
+}
+
+// Flush ensures all buffered AOF writes are persisted to disk
+func (he *HybridEngine) Flush() error {
+	if he.aofManager == nil {
+		return nil
+	}
+	he.aofManager.mu.Lock()
+	defer he.aofManager.mu.Unlock()
+	if he.aofManager.writer != nil {
+		if err := he.aofManager.writer.Flush(); err != nil {
+			return err
+		}
+		if he.aofManager.currentLog != nil {
+			return he.aofManager.currentLog.Sync()
+		}
+	}
+	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -100,6 +101,7 @@ type BasicStore struct {
 	// Background eviction
 	evictSignal chan struct{} // Signal background evictor to run
 	evictDone   chan struct{} // Closed when background evictor exits
+	closing     atomic.Bool  // Set to true during Close() to prevent sends on closed channels
 
 	// Background AOF
 	aofChan chan *persistence.LogEntry // Buffered channel for async AOF writes
@@ -600,6 +602,9 @@ func (s *BasicStore) Delete(key string) error {
 
 // signalEviction sends a non-blocking signal to the background evictor
 func (s *BasicStore) signalEviction() {
+	if s.closing.Load() {
+		return // Store is shutting down, don't send on closed channel
+	}
 	select {
 	case s.evictSignal <- struct{}{}:
 	default:
@@ -740,6 +745,9 @@ func (s *BasicStore) IsTombstoned(key string) bool {
 
 // Close shuts down the store and cleans up resources
 func (s *BasicStore) Close() error {
+	// Mark as closing to prevent signalEviction from sending on closed channel
+	s.closing.Store(true)
+
 	// Stop cleanup goroutine and background evictor
 	select {
 	case s.stopCleanup <- true:
@@ -753,6 +761,11 @@ func (s *BasicStore) Close() error {
 	// Close AOF channel and wait for drain
 	close(s.aofChan)
 	<-s.aofDone
+
+	// Flush persistence engine to ensure all buffered writes hit disk
+	if s.persistEngine != nil {
+		_ = s.persistEngine.Flush()
+	}
 
 	// Clear all items
 	_ = s.Clear()
