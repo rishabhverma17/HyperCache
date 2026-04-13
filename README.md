@@ -21,12 +21,12 @@
 ## 🎯 **Latest Features** ✅
 
 **Production-ready distributed cache with full observability stack:**
-- ✅ Multi-node cluster deployment with full replication
+- ✅ Multi-node cluster deployment with hash-ring partitioned routing
 - ✅ Full Redis client compatibility (RESP protocol)
 - ✅ Lamport timestamps for causal ordering of distributed writes
-- ✅ Read-repair for gossip propagation window
-- ✅ Early Cuckoo filter sync across nodes
-- ✅ Enterprise persistence (AOF + Snapshots)
+- ✅ Read-repair for replication propagation window
+- ✅ Sharded locks (32 independent shards) for high-concurrency writes
+- ✅ Enterprise persistence (AOF + Snapshots) with background writes
 - ✅ Structured JSON logging with correlation ID tracing
 - ✅ Real-time monitoring with Grafana + Elasticsearch
 - ✅ HTTP API + RESP protocol support
@@ -309,17 +309,18 @@ make deps               Download and tidy dependencies
 - Multi-store commands: SELECT, STORES
 
 ### **Distributed Resilience**
-- **Full Replication**: Every node stores every key — maximum availability, any node serves any request
-- **Lamport Timestamps**: Logical clocks for causal ordering of distributed operations. Stale writes from out-of-order gossip are automatically rejected
-- **Read-Repair**: On local cache miss, peer nodes are queried before returning 404. Bridges the gossip propagation window (~50-500ms) so clients never see stale misses
-- **Early Cuckoo Filter Sync**: Filter is updated immediately on gossip receive, before data is written. Eliminates false "definitely not here" rejections during replication lag
-- **Idempotent Replication**: DELETE on a missing key is a no-op, not an error. Designed for eventual consistency
+- **Hash-Ring Routing**: Consistent hashing with 256 virtual nodes routes each key to its primary owner. Non-owner nodes transparently proxy requests to the correct node
+- **Targeted Replication**: Writes replicate to N hash-ring replicas (default 3) via direct HTTP — not gossip broadcast to all nodes
+- **Lamport Timestamps**: Logical clocks for causal ordering of distributed operations. Stale writes from out-of-order replication are automatically rejected
+- **Read-Repair**: On local cache miss, hash-ring replicas are queried before returning 404. Bridges the replication propagation window
+- **Sharded Concurrency**: 32 independent lock shards eliminate the global mutex bottleneck. Each key locks only its shard
+- **Background Eviction**: Memory pressure triggers a background evictor goroutine — eviction never blocks the write path
 - **Correlation ID Tracing**: Every request gets a unique ID that flows across all nodes for end-to-end debugging
 
 ### **Enterprise Persistence & Recovery**
 - **Hybrid Persistence**: AOF (Append-Only File) + Snapshot dual strategy
+- **Background AOF**: 10,000-entry buffered channel — writes never block the SET critical path
 - **Configurable per Store**: Each data store can have independent persistence policies
-- **Sub-microsecond Writes**: AOF logging with low-latency write path
 - **Fast Recovery**: Complete data restoration from AOF replay + snapshot loading
 - **Snapshot Support**: Point-in-time recovery with configurable intervals
 - **Durability Guarantees**: Configurable sync policies (always, everysec, no)
@@ -342,7 +343,8 @@ make deps               Download and tidy dependencies
 
 ### **Advanced Memory Management**
 - **Per-Store Eviction Policies**: Independent LRU, LFU, or session-based eviction per store
-- **Smart Memory Pool**: Pressure monitoring (warning/critical/panic) with automatic cleanup
+- **Smart Memory Pool**: Pressure monitoring (warning/critical/panic) with background eviction
+- **Accurate Tracking**: 500-byte per-key overhead included in memory accounting (map bucket + struct + pointers)
 - **Real-time Usage Tracking**: Memory statistics and structured alerts
 - **Configurable Limits**: Store-specific memory boundaries
 
@@ -371,8 +373,10 @@ make deps               Download and tidy dependencies
 HyperCache/
 ├── cmd/hypercache/             # Server entry point
 ├── scripts/                    # Deployment and management scripts
-│   ├── start-system.sh         # Complete system launcher
-│   ├── build-and-run.sh        # Build and cluster management
+│   ├── start-3node-local.sh    # Local 3-node integration testing
+│   ├── start-cluster.sh        # Production cluster launcher
+│   ├── add-node.sh             # Add node to running cluster
+│   ├── run-server-benchmarks.sh # redis-benchmark test suite
 │   └── clean-*.sh              # Cleanup utilities
 ├── configs/                    # Node configuration files
 │   ├── node1-config.yaml       # Node 1 configuration
@@ -535,9 +539,11 @@ See [docs/README.md](docs/README.md) for the full documentation index:
 
 ### Clean Up
 ```bash
-# Stop all services
-./scripts/build-and-run.sh stop
-docker-compose -f docker-compose.logging.yml down
+# Stop all local nodes
+pkill -f bin/hypercache
+
+# Stop Docker cluster
+docker compose -f docker-compose.cluster.yml down
 
 # Clean persistence data
 ./scripts/clean-persistence.sh --all
@@ -550,17 +556,19 @@ docker-compose -f docker-compose.logging.yml down
 
 ### System Configuration
 ```bash
-# Start complete system with monitoring
-./scripts/start-system.sh --all
+# Start 3-node local cluster for development/testing
+./scripts/start-3node-local.sh
 
-# Start only cluster
-./scripts/start-system.sh --cluster  
+# Start custom N-node cluster
+make cluster NODES=5
 
-# Start only monitoring
-./scripts/start-system.sh --monitor
+# Stop cluster
+make cluster-stop
+pkill -f bin/hypercache
 
-# Clean data and restart
-./scripts/start-system.sh --clean --all
+# Docker cluster with full monitoring stack
+docker compose -f docker-compose.cluster.yml up -d
+docker compose -f docker-compose.cluster.yml down
 ```
 
 ### Node Configuration
@@ -575,6 +583,12 @@ network:
   http_port: 9080
   gossip_port: 7946
   
+cluster:
+  seeds: ["10.0.1.10:7946"]          # Static seeds (IP:port or hostname)
+  seed_dns: ""                       # DNS-based discovery (K8s headless Service)
+  seed_dns_port: 7946                # Port for DNS-discovered seeds
+  replication_factor: 3
+  
 cache:
   max_memory: "8GB"
   default_ttl: "0"            # 0 = infinite (no expiry); set per-store or per-key
@@ -586,6 +600,13 @@ persistence:
   strategy: "hybrid"          # "aof", "snapshot", "hybrid"
   sync_policy: "everysec"     # "always", "everysec", "no"
 ```
+
+**Seed Discovery Modes:**
+| Mode | Config | Use Case |
+|------|--------|----------|
+| Static | `seeds: ["ip:port"]` | Manual deployments |
+| DNS | `seed_dns: "headless-svc.ns.svc.cluster.local"` | Kubernetes StatefulSet |
+| Hostname | `seeds: ["node-1"]` | Docker Compose (auto-resolves via Docker DNS) |
 
 ### Environment Variable Overrides (Docker / K8s)
 Environment variables have highest priority and override both defaults and YAML config:
@@ -868,13 +889,19 @@ curl -X PUT http://localhost:9080/api/cache/feature:new_ui \
 git clone <your-repository-url>
 cd Cache
 
-# Quick start - everything in one command
-./scripts/start-system.sh
+# Build
+make build
+
+# Quick start — local 3-node cluster
+./scripts/start-3node-local.sh
+
+# Or Docker with full monitoring stack
+docker compose -f docker-compose.cluster.yml up -d
 
 # Access your system:
-# - Grafana: http://localhost:3000 (admin/admin123)  
-# - API: http://localhost:9080/api/cache/
-# - Redis: localhost:8080 (redis-cli -p 8080)
+# - HTTP API: http://localhost:9080/api/cache/
+# - RESP:    redis-cli -p 8080
+# - Grafana: http://localhost:3000 (admin/admin123, Docker only)
 ```
 
 ### First Steps
@@ -886,18 +913,23 @@ cd Cache
 ### Development Workflow
 ```bash
 # Build and test
-go build -o bin/hypercache cmd/hypercache/main.go
-go test ./internal/... -v
+make build
+make test-unit
 
-# Start development cluster
-./scripts/build-and-run.sh cluster
+# Start 3-node development cluster
+./scripts/start-3node-local.sh
 
-# View logs
-tail -f logs/*.log
+# Run Postman integration tests
+# Import HyperCache.postman_collection.json → Run Collection
 
-# Stop everything
-./scripts/build-and-run.sh stop
-docker-compose -f docker-compose.logging.yml down
+# Run server benchmarks (requires running server)
+make bench-server
+
+# Stop cluster
+pkill -f bin/hypercache
+
+# View logs (Docker)
+docker compose -f docker-compose.logging.yml up -d
 ```
 
 ## 📚 **Documentation**

@@ -45,7 +45,9 @@ type NetworkConfig struct {
 
 // ClusterConfig contains clustering configuration
 type ClusterConfig struct {
-	Seeds             []string `yaml:"seeds"` // Seed nodes for joining cluster
+	Seeds             []string `yaml:"seeds"`         // Seed nodes for joining cluster (IP:port or DNS hostname)
+	SeedDNS           string   `yaml:"seed_dns"`      // DNS hostname for seed discovery (e.g. headless K8s Service)
+	SeedDNSPort       int      `yaml:"seed_dns_port"` // Port to use with DNS-discovered seeds (default: gossip port)
 	ReplicationFactor int      `yaml:"replication_factor"`
 	ConsistencyLevel  string   `yaml:"consistency_level"`
 }

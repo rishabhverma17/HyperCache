@@ -382,3 +382,183 @@ func (nc *NodeCommunicator) Close() {
 	}
 	nc.pendingRequests = make(map[string]chan *NodeResponse)
 }
+
+// ReplicateEntry sends a key-value pair directly to a node via HTTP POST /internal/replicate.
+// This is used for hash-ring targeted replication (not gossip broadcast).
+func (nc *NodeCommunicator) ReplicateEntry(ctx context.Context, nodeID string, key string, value interface{}, ttlSeconds float64, lamportTS uint64) error {
+	member, exists := nc.membership.GetMember(nodeID)
+	if !exists {
+		return fmt.Errorf("node %s not found in cluster", nodeID)
+	}
+
+	httpPort := ""
+	if hp, ok := member.Metadata["http_port"]; ok {
+		httpPort = hp
+	}
+	if httpPort == "" || httpPort == "0" {
+		// Fallback: API port = gossip port + 1000
+		httpPort = fmt.Sprintf("%d", member.Port+1000)
+	}
+
+	payload := map[string]interface{}{
+		"key":        key,
+		"value":      value,
+		"ttl":        ttlSeconds,
+		"lamport_ts": lamportTS,
+		"from_node":  nc.localNodeID,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal replication payload: %w", err)
+	}
+
+	url := fmt.Sprintf("http://%s:%s/internal/replicate", member.Address, httpPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-HyperCache-Node-ID", nc.localNodeID)
+
+	resp, err := nc.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("replication HTTP request to %s failed: %w", nodeID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("replication to %s returned %d: %s", nodeID, resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// ProxyGet forwards a GET request to the owner node and returns the raw value.
+func (nc *NodeCommunicator) ProxyGet(ctx context.Context, nodeID string, key string) (interface{}, bool, error) {
+	member, exists := nc.membership.GetMember(nodeID)
+	if !exists {
+		return nil, false, fmt.Errorf("node %s not found in cluster", nodeID)
+	}
+
+	httpPort := ""
+	if hp, ok := member.Metadata["http_port"]; ok {
+		httpPort = hp
+	}
+	if httpPort == "" || httpPort == "0" {
+		httpPort = fmt.Sprintf("%d", member.Port+1000)
+	}
+
+	url := fmt.Sprintf("http://%s:%s/internal/get/%s", member.Address, httpPort, key)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("X-HyperCache-Node-ID", nc.localNodeID)
+
+	resp, err := nc.httpClient.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("proxy GET to %s failed: %w", nodeID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("proxy GET to %s returned %d", nodeID, resp.StatusCode)
+	}
+
+	var body struct {
+		Value interface{} `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, false, fmt.Errorf("failed to decode proxy GET response: %w", err)
+	}
+	return body.Value, true, nil
+}
+
+// ProxySet forwards a SET request to the owner node.
+func (nc *NodeCommunicator) ProxySet(ctx context.Context, nodeID string, key string, value interface{}, ttlSeconds float64) error {
+	member, exists := nc.membership.GetMember(nodeID)
+	if !exists {
+		return fmt.Errorf("node %s not found in cluster", nodeID)
+	}
+
+	httpPort := ""
+	if hp, ok := member.Metadata["http_port"]; ok {
+		httpPort = hp
+	}
+	if httpPort == "" || httpPort == "0" {
+		httpPort = fmt.Sprintf("%d", member.Port+1000)
+	}
+
+	payload := map[string]interface{}{
+		"value": value,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s:%s/api/cache/%s", member.Address, httpPort, key)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-HyperCache-Node-ID", nc.localNodeID)
+	req.Header.Set("X-HyperCache-Proxied", "true") // Prevent infinite proxy loops
+
+	resp, err := nc.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("proxy SET to %s failed: %w", nodeID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("proxy SET to %s returned %d: %s", nodeID, resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// ProxyDelete forwards a DELETE request to the owner node.
+func (nc *NodeCommunicator) ProxyDelete(ctx context.Context, nodeID string, key string) (bool, error) {
+	member, exists := nc.membership.GetMember(nodeID)
+	if !exists {
+		return false, fmt.Errorf("node %s not found in cluster", nodeID)
+	}
+
+	httpPort := ""
+	if hp, ok := member.Metadata["http_port"]; ok {
+		httpPort = hp
+	}
+	if httpPort == "" || httpPort == "0" {
+		httpPort = fmt.Sprintf("%d", member.Port+1000)
+	}
+
+	url := fmt.Sprintf("http://%s:%s/api/cache/%s", member.Address, httpPort, key)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("X-HyperCache-Node-ID", nc.localNodeID)
+	req.Header.Set("X-HyperCache-Proxied", "true")
+
+	resp, err := nc.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("proxy DELETE to %s failed: %w", nodeID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("proxy DELETE to %s returned %d", nodeID, resp.StatusCode)
+	}
+
+	var body struct {
+		Existed bool `json:"existed"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	return body.Existed, nil
+}

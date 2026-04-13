@@ -108,6 +108,10 @@ func (dc *DistributedCoordinator) Start(ctx context.Context) error {
 	go dc.membershipSync(ctx)
 	go dc.heartbeatLoop(ctx)
 
+	// Sync existing cluster members to hash ring — covers members that joined
+	// before our subscription started (the "join-then-subscribe" race)
+	dc.syncExistingMembers()
+
 	dc.running = true
 
 	// Publish startup event
@@ -273,6 +277,29 @@ func (dc *DistributedCoordinator) membershipSync(ctx context.Context) {
 	}
 }
 
+// syncExistingMembers adds all currently known cluster members to the hash ring.
+// Called once at startup to handle the race between joining and subscribing.
+func (dc *DistributedCoordinator) syncExistingMembers() {
+	members := dc.membership.GetAliveNodes()
+	for _, member := range members {
+		if member.NodeID == dc.localNodeID {
+			continue // Already added in Start()
+		}
+
+		err := dc.hashRing.AddNode(member.NodeID, member.Address, member.Port)
+		if err != nil {
+			// "already exists" is expected if the subscribe caught it too — ignore
+			continue
+		}
+
+		logging.Info(nil, logging.ComponentCoordinator, "hash_ring", "Synced existing member to hash ring", map[string]interface{}{
+			"node_id": member.NodeID,
+			"address": member.Address,
+			"port":    member.Port,
+		})
+	}
+}
+
 // handleMembershipEvent processes membership changes and updates hash ring
 func (dc *DistributedCoordinator) handleMembershipEvent(ctx context.Context, event MembershipEvent) {
 	member := event.Member
@@ -432,6 +459,16 @@ func (dr *distributedRouting) AnalyzeDistribution(keys []string) DistributionSta
 
 func (dr *distributedRouting) GetMetrics() HashRingMetrics {
 	return dr.coordinator.hashRing.GetMetrics()
+}
+
+// GetHashRing returns the underlying hash ring (for direct routing lookups)
+func (dc *DistributedCoordinator) GetHashRing() *HashRing {
+	return dc.hashRing
+}
+
+// GetNodeCommunicator creates a NodeCommunicator bound to this coordinator's membership
+func (dc *DistributedCoordinator) GetNodeCommunicator() *NodeCommunicator {
+	return NewNodeCommunicator(dc.localNodeID, dc.membership)
 }
 
 // Factory function for distributed coordinator

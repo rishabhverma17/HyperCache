@@ -35,6 +35,19 @@ func (item *CacheItem) GetValue() (interface{}, error) {
 	return deserializeValue(item.ValuePtr, item.ValueType)
 }
 
+// GetRawBytes returns the raw stored bytes without deserialization.
+// For string and []byte values, this avoids the string(data) allocation
+// that GetValue() performs. Returns nil if the item has no data.
+func (item *CacheItem) GetRawBytes() []byte {
+	return item.ValuePtr
+}
+
+// IsStringType returns true if the stored value is a string or []byte,
+// meaning GetRawBytes() can be used directly without deserialization.
+func (item *CacheItem) IsStringType() bool {
+	return item.ValueType == "string" || item.ValueType == "[]uint8"
+}
+
 // IsExpired checks if the item has expired
 func (item *CacheItem) IsExpired() bool {
 	return !item.ExpiresAt.IsZero() && time.Now().After(item.ExpiresAt)
@@ -75,19 +88,22 @@ func (s *BasicStoreStats) HitRate() float64 {
 // BasicStore implements the Store interface with integrated MemoryPool, EvictionPolicy, and optional Filter
 type BasicStore struct {
 	config        BasicStoreConfig
-	items         map[string]*CacheItem
+	data          *ShardedMap // Sharded concurrent map (replaces items + allocatedPtrs + tombstones)
 	memPool       *MemoryPool
 	evictPolicy   cache.EvictionPolicy
 	filter        filter.ProbabilisticFilter    // Optional Cuckoo/Bloom filter for negative lookups
 	persistEngine persistence.PersistenceEngine // Optional persistence layer
-	mutex         sync.RWMutex
+	mutex         sync.RWMutex                  // Protects stats only (not data — that's sharded)
 	stats         BasicStoreStats
 	stopCleanup   chan bool
-	allocatedPtrs map[string][]byte // Track allocated pointers for proper cleanup
 
-	// Tombstones: recently deleted keys — prevents read-repair from resurrecting
-	// keys that were intentionally deleted but gossip hasn't propagated yet.
-	tombstones map[string]time.Time
+	// Background eviction
+	evictSignal chan struct{} // Signal background evictor to run
+	evictDone   chan struct{} // Closed when background evictor exits
+
+	// Background AOF
+	aofChan chan *persistence.LogEntry // Buffered channel for async AOF writes
+	aofDone chan struct{}              // Closed when AOF goroutine exits
 }
 
 // serializeValue converts interface{} values to []byte for storage in allocated memory
@@ -225,12 +241,14 @@ func NewBasicStore(config BasicStoreConfig) (*BasicStore, error) {
 	memPool := NewMemoryPool(config.Name, int64(config.MaxMemory))
 
 	store := &BasicStore{
-		config:        config,
-		items:         make(map[string]*CacheItem),
-		memPool:       memPool,
-		stopCleanup:   make(chan bool),
-		allocatedPtrs: make(map[string][]byte),
-		tombstones:    make(map[string]time.Time),
+		config:      config,
+		data:        NewShardedMap(),
+		memPool:     memPool,
+		stopCleanup: make(chan bool),
+		evictSignal: make(chan struct{}, 1),
+		evictDone:   make(chan struct{}),
+		aofChan:     make(chan *persistence.LogEntry, 10000),
+		aofDone:     make(chan struct{}),
 		stats: BasicStoreStats{
 			CreatedAt: time.Now(),
 		},
@@ -260,12 +278,18 @@ func NewBasicStore(config BasicStoreConfig) (*BasicStore, error) {
 		store.persistEngine = persistEngine
 	}
 
-	// Set up memory pressure callbacks
+	// Set up memory pressure callbacks — signal background evictor
 	memPool.SetPressureHandlers(
-		func(usage float64) { store.handleMemoryPressure("low", usage) },    // Warning
-		func(usage float64) { store.handleMemoryPressure("medium", usage) }, // Critical
-		func(usage float64) { store.handleMemoryPressure("high", usage) },   // Panic
+		func(usage float64) { store.signalEviction() }, // Warning
+		func(usage float64) { store.signalEviction() }, // Critical
+		func(usage float64) { store.signalEviction() }, // Panic
 	)
+
+	// Start background evictor goroutine
+	go store.backgroundEvictor()
+
+	// Start background AOF goroutine
+	go store.backgroundAOFWriter()
 
 	// Start cleanup goroutine for expired items
 	if config.CleanupInterval > 0 {
@@ -286,15 +310,10 @@ func (s *BasicStore) Set(key string, value interface{}, sessionID string, ttl ti
 }
 
 // SetWithTimestamp writes a value only if the Lamport timestamp is newer than the existing one.
-// Used by the replication handler to enforce causal ordering — prevents older writes from
-// overwriting newer ones when gossip events arrive out of order.
 func (s *BasicStore) SetWithTimestamp(ctx context.Context, key string, value interface{}, sessionID string, ttl time.Duration, lamportTS uint64) (bool, error) {
-	s.mutex.RLock()
-	if existing, exists := s.items[key]; exists && existing.LamportTimestamp >= lamportTS {
-		s.mutex.RUnlock()
+	if existing, ok := s.data.Get(key); ok && existing.LamportTimestamp >= lamportTS {
 		return false, nil // Existing value is newer or equal — skip
 	}
-	s.mutex.RUnlock()
 
 	err := s.setWithContextInternal(ctx, key, value, sessionID, ttl, lamportTS)
 	if err != nil {
@@ -305,9 +324,7 @@ func (s *BasicStore) SetWithTimestamp(ctx context.Context, key string, value int
 
 // GetTimestamp returns the Lamport timestamp for a key, or 0 if not found.
 func (s *BasicStore) GetTimestamp(key string) uint64 {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	if item, exists := s.items[key]; exists {
+	if item, ok := s.data.Get(key); ok {
 		return item.LamportTimestamp
 	}
 	return 0
@@ -329,43 +346,41 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 
 	size := uint64(len(serializedData))
 
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	// Check if we can allocate memory
+	// Check if we can allocate memory (no global lock needed — memPool is atomic)
 	if s.memPool.AvailableSpace() < int64(size) {
-		// Try to evict some items to make space
-		if evictErr := s.evictForSpace(size); evictErr != nil {
-			s.incrementErrorCountUnsafe()
+		s.signalEviction()
+		time.Sleep(500 * time.Microsecond)
+		if s.memPool.AvailableSpace() < int64(size) {
+			s.incrementErrorCount()
 			return fmt.Errorf("insufficient memory: need %d bytes, available %d", size, s.memPool.AvailableSpace())
 		}
 	}
 
-	// Allocate memory for the serialized data
+	// Allocate memory
 	allocatedMemory, err := s.memPool.Allocate(int64(size))
 	if err != nil {
-		s.incrementErrorCountUnsafe()
+		s.incrementErrorCount()
 		return fmt.Errorf("failed to allocate memory: %w", err)
 	}
-
-	// Copy serialized data into allocated memory
 	copy(allocatedMemory, serializedData)
 
+	// Lock only the shard for this key
+	s.data.LockShard(key)
+	sh := s.data.getShard(key)
+
 	// Handle existing item
-	if existingItem, exists := s.items[key]; exists {
-		// Free old item's memory
-		if oldPtr, ptrExists := s.allocatedPtrs[key]; ptrExists {
+	if existingItem, exists := sh.items[key]; exists {
+		if oldPtr, ptrExists := sh.allocatedPtrs[key]; ptrExists {
 			_ = s.memPool.Free(oldPtr)
-			delete(s.allocatedPtrs, key)
 		}
-		// Remove from eviction policy
 		oldEntry := s.itemToEntry(key, existingItem)
 		s.evictPolicy.OnDelete(oldEntry)
-		s.stats.TotalItems--
-		s.stats.TotalMemory -= existingItem.Size
+		s.updateStats(func() {
+			s.stats.TotalItems--
+			s.stats.TotalMemory -= existingItem.Size
+		})
 	}
 
-	// Create new item with memory integration
 	expiresAt := time.Time{}
 	if ttl > 0 {
 		expiresAt = time.Now().Add(ttl)
@@ -375,9 +390,9 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 
 	item := &CacheItem{
 		Key:              key,
-		ValuePtr:         allocatedMemory, // Points to actual allocated memory!
-		ValueType:        valueType,       // Store type for deserialization
-		Size:             size,            // Actual size of serialized data
+		ValuePtr:         allocatedMemory,
+		ValueType:        valueType,
+		Size:             size,
 		CreatedAt:        time.Now(),
 		ExpiresAt:        expiresAt,
 		SessionID:        sessionID,
@@ -386,40 +401,24 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 		LamportTimestamp: lamportTS,
 	}
 
-	// Store the item and track allocation
-	s.items[key] = item
-	s.allocatedPtrs[key] = allocatedMemory
-	s.stats.TotalItems++
-	s.stats.TotalMemory += size
-	s.stats.LastAccess = time.Now()
+	sh.items[key] = item
+	sh.allocatedPtrs[key] = allocatedMemory
+	delete(sh.tombstones, key)
+	s.data.UnlockShard(key)
 
-	// Clear any tombstone for this key (re-creation after delete)
-	delete(s.tombstones, key)
+	s.updateStats(func() {
+		s.stats.TotalItems++
+		s.stats.TotalMemory += size
+		s.stats.LastAccess = time.Now()
+	})
 
-	// Add to eviction policy
 	entry := s.itemToEntry(key, item)
 	s.evictPolicy.OnInsert(entry)
 
-	// Add to filter if available
 	if s.filter != nil {
-		if err := s.filter.Add([]byte(key)); err != nil {
-			// Log error but don't fail the Set operation
-			logging.Warn(nil, logging.ComponentFilter, "add_error", "Failed to add key to cuckoo filter", map[string]interface{}{
-				"key":         key,
-				"store":       s.config.Name,
-				"filter_type": "cuckoo",
-				"error":       err.Error(),
-			})
-		} else {
-			logging.Debug(ctx, logging.ComponentFilter, "add_success", "Key added to cuckoo filter", map[string]interface{}{
-				"key":         key,
-				"store":       s.config.Name,
-				"filter_type": "cuckoo",
-			})
-		}
+		_ = s.filter.Add([]byte(key))
 	}
 
-	// Log to persistence if enabled
 	if s.persistEngine != nil {
 		logEntry := &persistence.LogEntry{
 			Timestamp: time.Now(),
@@ -429,13 +428,20 @@ func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, val
 			TTL:       int64(ttl.Seconds()),
 			SessionID: sessionID,
 		}
-		if err := s.persistEngine.WriteEntry(logEntry); err != nil {
-			// Log error but don't fail the Set operation
-			logging.Warn(nil, logging.ComponentStorage, logging.ActionPersist, "Failed to log SET operation", map[string]interface{}{"error": err.Error()})
+		select {
+		case s.aofChan <- logEntry:
+		default:
 		}
 	}
 
 	return nil
+}
+
+// updateStats safely updates store stats under the stats mutex
+func (s *BasicStore) updateStats(fn func()) {
+	s.mutex.Lock()
+	fn()
+	s.mutex.Unlock()
 }
 
 // Get retrieves an item from the cache with true memory integration
@@ -449,6 +455,48 @@ func (s *BasicStore) Get(key string) (interface{}, error) {
 	return s.getInternal(nil, key)
 }
 
+// GetRawBytes retrieves the raw stored bytes for a key without deserialization.
+// Returns (bytes, valueType, error). For string/[]byte values this is zero-copy
+// and avoids the string(data) allocation that Get() performs.
+// The RESP handler should use this instead of Get() for maximum throughput.
+func (s *BasicStore) GetRawBytes(key string) ([]byte, string, error) {
+	if key == "" {
+		return nil, "", fmt.Errorf("key cannot be empty")
+	}
+
+	if s.filter != nil {
+		if !s.filter.Contains([]byte(key)) {
+			s.incrementMissCount()
+			return nil, "", fmt.Errorf("key not found: %s", key)
+		}
+	}
+
+	item, exists := s.data.Get(key)
+	if !exists {
+		s.incrementMissCount()
+		return nil, "", fmt.Errorf("key not found: %s", key)
+	}
+
+	if item.IsExpired() {
+		_ = s.Delete(key)
+		s.incrementMissCount()
+		return nil, "", fmt.Errorf("key expired: %s", key)
+	}
+
+	// Update access stats
+	s.data.LockShard(key)
+	item.AccessCount++
+	item.LastAccessed = time.Now()
+	s.data.UnlockShard(key)
+	s.updateStats(func() { s.stats.LastAccess = time.Now() })
+
+	entry := s.itemToEntry(key, item)
+	s.evictPolicy.OnAccess(entry)
+
+	s.incrementHitCount()
+	return item.GetRawBytes(), item.ValueType, nil
+}
+
 // getInternal is the internal implementation that accepts an optional context
 func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, error) {
 	if key == "" {
@@ -459,27 +507,12 @@ func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, 
 	// Check filter first for early negative lookup (if filter is enabled)
 	if s.filter != nil {
 		if !s.filter.Contains([]byte(key)) {
-			// Key definitely not in cache - early return
-			logging.Debug(ctx, logging.ComponentFilter, "negative_lookup", "Cuckoo filter early rejection", map[string]interface{}{
-				"key":         key,
-				"store":       s.config.Name,
-				"filter_type": "cuckoo",
-			})
 			s.incrementMissCount()
 			return nil, fmt.Errorf("key not found: %s", key)
 		}
-		// Key might be in cache (filter says possibly present)
-		logging.Debug(ctx, logging.ComponentFilter, "positive_lookup", "Cuckoo filter possible match", map[string]interface{}{
-			"key":         key,
-			"store":       s.config.Name,
-			"filter_type": "cuckoo",
-		})
-		// Continue with actual lookup
 	}
 
-	s.mutex.RLock()
-	item, exists := s.items[key]
-	s.mutex.RUnlock()
+	item, exists := s.data.Get(key)
 
 	if !exists {
 		s.incrementMissCount()
@@ -488,18 +521,17 @@ func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, 
 
 	// Check expiration
 	if item.IsExpired() {
-		// Remove expired item
 		_ = s.Delete(key)
 		s.incrementMissCount()
 		return nil, fmt.Errorf("key expired: %s", key)
 	}
 
-	// Update access statistics
-	s.mutex.Lock()
+	// Update access statistics (non-critical, shard-local)
+	s.data.LockShard(key)
 	item.AccessCount++
 	item.LastAccessed = time.Now()
-	s.stats.LastAccess = time.Now()
-	s.mutex.Unlock()
+	s.data.UnlockShard(key)
+	s.updateStats(func() { s.stats.LastAccess = time.Now() })
 
 	// Update eviction policy
 	entry := s.itemToEntry(key, item)
@@ -523,79 +555,132 @@ func (s *BasicStore) Delete(key string) error {
 		return fmt.Errorf("key cannot be empty")
 	}
 
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	item, exists := s.items[key]
-	if !exists {
+	item, allocPtr, existed := s.data.Delete(key)
+	if !existed {
 		return fmt.Errorf("key not found: %s", key)
 	}
 
 	// Free memory
-	if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-		_ = s.memPool.Free(ptr)
-		delete(s.allocatedPtrs, key)
+	if allocPtr != nil {
+		_ = s.memPool.Free(allocPtr)
 	}
 
 	// Remove from eviction policy
 	entry := s.itemToEntry(key, item)
 	s.evictPolicy.OnDelete(entry)
 
-	// Remove from items
-	delete(s.items, key)
-	s.stats.TotalItems--
-	s.stats.TotalMemory -= item.Size
-	s.stats.LastAccess = time.Now()
+	s.updateStats(func() {
+		s.stats.TotalItems--
+		s.stats.TotalMemory -= item.Size
+		s.stats.LastAccess = time.Now()
+	})
 
 	// Remove from filter if available
 	if s.filter != nil {
 		s.filter.Delete([]byte(key))
 	}
 
-	// Record tombstone so read-repair won't resurrect this key
-	// during the gossip propagation window (~10s is generous)
-	s.tombstones[key] = time.Now().Add(10 * time.Second)
+	// Tombstone already recorded by s.data.Delete() in the shard
 
-	// Log to persistence if enabled
+	// Log to persistence via background AOF channel
 	if s.persistEngine != nil {
 		logEntry := &persistence.LogEntry{
 			Timestamp: time.Now(),
 			Operation: "DEL",
 			Key:       key,
 		}
-		if err := s.persistEngine.WriteEntry(logEntry); err != nil {
-			logging.Warn(nil, logging.ComponentStorage, logging.ActionPersist, "Failed to log DELETE operation", map[string]interface{}{"error": err.Error()})
+		select {
+		case s.aofChan <- logEntry:
+		default:
 		}
 	}
 
 	return nil
 }
 
-// Clear removes all items from the cache
-func (s *BasicStore) Clear() error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+// signalEviction sends a non-blocking signal to the background evictor
+func (s *BasicStore) signalEviction() {
+	select {
+	case s.evictSignal <- struct{}{}:
+	default:
+		// Already signaled
+	}
+}
 
-	// Free all memory
-	for key, ptr := range s.allocatedPtrs {
-		_ = s.memPool.Free(ptr)
-		// Notify eviction policy
-		if item, exists := s.items[key]; exists {
-			entry := s.itemToEntry(key, item)
-			s.evictPolicy.OnDelete(entry)
+// backgroundEvictor runs in a goroutine and proactively evicts when memory pressure is high
+func (s *BasicStore) backgroundEvictor() {
+	defer close(s.evictDone)
+	for {
+		select {
+		case _, ok := <-s.evictSignal:
+			if !ok {
+				return
+			}
+			targetPressure := 0.75
+			for s.memPool.MemoryPressure() > targetPressure {
+				// Collect expired keys first
+				expired := s.data.CollectExpired(func(item *CacheItem) bool { return item.IsExpired() })
+				for _, key := range expired {
+					_ = s.Delete(key)
+				}
+
+				if s.memPool.MemoryPressure() <= targetPressure {
+					break
+				}
+
+				// Evict via eviction policy
+				evicted := uint64(0)
+				for i := 0; i < 20; i++ {
+					candidate := s.evictPolicy.NextEvictionCandidate()
+					if candidate == nil {
+						break
+					}
+					key := string(candidate.Key)
+					_ = s.Delete(key)
+					evicted++
+				}
+				if evicted == 0 && len(expired) == 0 {
+					break
+				}
+			}
+		case <-s.stopCleanup:
+			return
 		}
 	}
+}
 
-	// Clear eviction policy (already cleared through OnDelete calls above)
+// backgroundAOFWriter drains the AOF channel and writes entries to persistence
+func (s *BasicStore) backgroundAOFWriter() {
+	defer close(s.aofDone)
+	for entry := range s.aofChan {
+		if s.persistEngine != nil {
+			if err := s.persistEngine.WriteEntry(entry); err != nil {
+				logging.Warn(nil, logging.ComponentStorage, logging.ActionPersist, "Background AOF write failed", map[string]interface{}{"error": err.Error()})
+			}
+		}
+	}
+}
 
-	// Clear items and pointers
-	s.items = make(map[string]*CacheItem)
-	s.allocatedPtrs = make(map[string][]byte)
+// Clear removes all items from the cache
+func (s *BasicStore) Clear() error {
+	// Free all memory across shards
+	s.data.RangeAll(func(key string, item *CacheItem) bool {
+		if ptr, ok := s.data.GetAllocatedPtr(key); ok {
+			_ = s.memPool.Free(ptr)
+		}
+		entry := s.itemToEntry(key, item)
+		s.evictPolicy.OnDelete(entry)
+		return true
+	})
+
+	s.data.Clear()
+
+	s.mutex.Lock()
 	s.stats.TotalItems = 0
 	s.stats.TotalMemory = 0
 	s.stats.LastAccess = time.Now()
+	s.mutex.Unlock()
 
-	// Clear filter if available
 	if s.filter != nil {
 		_ = s.filter.Clear()
 	}
@@ -605,9 +690,7 @@ func (s *BasicStore) Clear() error {
 
 // Size returns the number of items in the cache
 func (s *BasicStore) Size() uint64 {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	return s.stats.TotalItems
+	return uint64(s.data.Size())
 }
 
 // Memory returns the total memory usage
@@ -651,65 +734,39 @@ func (s *BasicStore) FilterAdd(key string) {
 }
 
 // IsTombstoned returns true if the key was recently deleted locally.
-// Read-repair checks this to avoid resurrecting intentionally deleted keys
-// during the gossip propagation window.
 func (s *BasicStore) IsTombstoned(key string) bool {
-	s.mutex.RLock()
-	expiry, exists := s.tombstones[key]
-	s.mutex.RUnlock()
-	if !exists {
-		return false
-	}
-	if time.Now().After(expiry) {
-		// Tombstone expired — clean it up
-		s.mutex.Lock()
-		delete(s.tombstones, key)
-		s.mutex.Unlock()
-		return false
-	}
-	return true
+	return s.data.IsTombstoned(key)
 }
 
 // Close shuts down the store and cleans up resources
 func (s *BasicStore) Close() error {
-	// Stop cleanup goroutine
+	// Stop cleanup goroutine and background evictor
 	select {
 	case s.stopCleanup <- true:
 	default:
 	}
 
+	// Close eviction signal channel to stop background evictor
+	close(s.evictSignal)
+	<-s.evictDone
+
+	// Close AOF channel and wait for drain
+	close(s.aofChan)
+	<-s.aofDone
+
 	// Clear all items
 	_ = s.Clear()
 
-	// Close resources - no specific close method needed for MemoryPool
 	return nil
 }
 
-// handleMemoryPressure handles memory pressure events by triggering evictions
-// This method needs to be thread-safe since it's called from memory pool callbacks
-func (s *BasicStore) handleMemoryPressure(level string, usage float64) {
-	// Use a separate goroutine to avoid blocking the allocation path
-	go func() {
-		switch level {
-		case "low":
-			// Light eviction - remove expired items
-			s.evictExpiredItemsSafe()
-		case "medium":
-			// Medium eviction - remove expired + least accessed
-			s.evictExpiredItemsSafe()
-			s.evictLeastAccessedSafe(10) // Evict 10 items
-		case "high":
-			// Aggressive eviction - remove expired + more least accessed
-			s.evictExpiredItemsSafe()
-			s.evictLeastAccessedSafe(50) // Evict 50 items
-		}
-	}()
-}
-
-// evictForSpace tries to evict items to make space for new allocation
+// evictForSpace tries to evict items to make space for new allocation (kept for backward compat)
 func (s *BasicStore) evictForSpace(neededSize uint64) error {
-	// First try expired items
-	evicted := s.evictExpiredItems()
+	// Evict expired items first
+	expired := s.data.CollectExpired(func(item *CacheItem) bool { return item.IsExpired() })
+	for _, key := range expired {
+		_ = s.Delete(key)
+	}
 	if s.memPool.AvailableSpace() >= int64(neededSize) {
 		return nil
 	}
@@ -720,40 +777,14 @@ func (s *BasicStore) evictForSpace(neededSize uint64) error {
 		if candidate == nil {
 			break
 		}
-
 		key := string(candidate.Key)
-		if item, exists := s.items[key]; exists {
-			// Free memory
-			if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-				_ = s.memPool.Free(ptr)
-				delete(s.allocatedPtrs, key)
-			}
-			// Remove from eviction policy
-			s.evictPolicy.OnDelete(candidate)
-			// Remove from items
-			delete(s.items, key)
-			s.stats.TotalItems--
-			s.stats.TotalMemory -= item.Size
-			s.stats.EvictionCount++
-			evicted++
-
-			// Remove from filter if available
-			if s.filter != nil {
-				s.filter.Delete([]byte(key))
-			}
-		}
+		_ = s.Delete(key)
 	}
 
-	if evicted == 0 {
-		return fmt.Errorf("unable to evict any items to make space")
+	if s.memPool.AvailableSpace() < int64(neededSize) {
+		return fmt.Errorf("unable to evict enough items to make space")
 	}
-
 	return nil
-}
-
-// evictExpiredItems removes all expired items (assumes lock is held)
-func (s *BasicStore) evictExpiredItems() uint64 {
-	return s.evictExpiredItemsUnsafe()
 }
 
 // cleanupExpiredItems runs periodic cleanup of expired items
@@ -764,7 +795,10 @@ func (s *BasicStore) cleanupExpiredItems() {
 	for {
 		select {
 		case <-ticker.C:
-			s.evictExpiredItemsSafe() // Use safe version for background cleanup
+			expired := s.data.CollectExpired(func(item *CacheItem) bool { return item.IsExpired() })
+			for _, key := range expired {
+				_ = s.Delete(key)
+			}
 		case <-s.stopCleanup:
 			return
 		}
@@ -817,87 +851,26 @@ func (s *BasicStore) itemToEntry(key string, item *CacheItem) *cache.Entry {
 	}
 }
 
-// evictExpiredItemsSafe is a thread-safe version of evictExpiredItems for async callbacks
+// evictExpiredItemsSafe evicts expired items (thread-safe, uses ShardedMap)
 func (s *BasicStore) evictExpiredItemsSafe() uint64 {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	return s.evictExpiredItemsUnsafe()
-}
-
-// evictExpiredItemsUnsafe removes expired items without locking (caller must hold lock)
-func (s *BasicStore) evictExpiredItemsUnsafe() uint64 {
-	now := time.Now()
-	evicted := uint64(0)
-
-	for key, item := range s.items {
-		if !item.ExpiresAt.IsZero() && now.After(item.ExpiresAt) {
-			// Free memory
-			if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-				_ = s.memPool.Free(ptr)
-				delete(s.allocatedPtrs, key)
-			}
-			// Remove from eviction policy
-			entry := s.itemToEntry(key, item)
-			s.evictPolicy.OnDelete(entry)
-			// Remove from items
-			delete(s.items, key)
-			s.stats.TotalItems--
-			s.stats.TotalMemory -= item.Size
-			s.stats.EvictionCount++
-			evicted++
-
-			// Remove from filter if available
-			if s.filter != nil {
-				s.filter.Delete([]byte(key))
-			}
-		}
+	expired := s.data.CollectExpired(func(item *CacheItem) bool { return item.IsExpired() })
+	for _, key := range expired {
+		_ = s.Delete(key)
 	}
-
-	return evicted
+	return uint64(len(expired))
 }
 
-// evictLeastAccessedSafe is a thread-safe version of evictLeastAccessed for async callbacks
+// evictLeastAccessedSafe evicts least accessed items (thread-safe)
 func (s *BasicStore) evictLeastAccessedSafe(count uint64) uint64 {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	return s.evictLeastAccessedUnsafe(count)
-}
-
-// evictLeastAccessedUnsafe removes least accessed items without locking (caller must hold lock)
-func (s *BasicStore) evictLeastAccessedUnsafe(count uint64) uint64 {
-	if count == 0 {
-		return 0
-	}
-
 	evicted := uint64(0)
 	for i := uint64(0); i < count; i++ {
 		candidate := s.evictPolicy.NextEvictionCandidate()
 		if candidate == nil {
-			break // No more candidates
+			break
 		}
-
 		key := string(candidate.Key)
-		if item, exists := s.items[key]; exists {
-			// Free memory
-			if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-				_ = s.memPool.Free(ptr)
-				delete(s.allocatedPtrs, key)
-			}
-			// Remove from eviction policy
-			s.evictPolicy.OnDelete(candidate)
-			// Remove from items
-			delete(s.items, key)
-			s.stats.TotalItems--
-			s.stats.TotalMemory -= item.Size
-			s.stats.EvictionCount++
-			evicted++
-
-			// Remove from filter if available
-			if s.filter != nil {
-				s.filter.Delete([]byte(key))
-			}
-		}
+		_ = s.Delete(key)
+		evicted++
 	}
-
 	return evicted
 }

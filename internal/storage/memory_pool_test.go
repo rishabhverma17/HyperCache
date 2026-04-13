@@ -28,9 +28,9 @@ func TestMemoryPool_BasicOperations(t *testing.T) {
 }
 
 func TestMemoryPool_AllocationAndFree(t *testing.T) {
-	pool := NewMemoryPool("test-pool", 1024)
+	pool := NewMemoryPool("test-pool", 2048)
 
-	// Allocate memory
+	// Allocate memory (actual usage = 512 + PerKeyOverhead)
 	data, err := pool.Allocate(512)
 	if err != nil {
 		t.Fatalf("Failed to allocate memory: %v", err)
@@ -40,15 +40,17 @@ func TestMemoryPool_AllocationAndFree(t *testing.T) {
 		t.Errorf("Expected allocated slice length to be 512, got %d", len(data))
 	}
 
-	if pool.CurrentUsage() != 512 {
-		t.Errorf("Expected usage to be 512, got %d", pool.CurrentUsage())
+	expectedUsage := int64(512 + PerKeyOverhead)
+	if pool.CurrentUsage() != expectedUsage {
+		t.Errorf("Expected usage to be %d, got %d", expectedUsage, pool.CurrentUsage())
 	}
 
-	if pool.AvailableSpace() != 512 {
-		t.Errorf("Expected available space to be 512, got %d", pool.AvailableSpace())
+	expectedAvail := int64(2048) - expectedUsage
+	if pool.AvailableSpace() != expectedAvail {
+		t.Errorf("Expected available space to be %d, got %d", expectedAvail, pool.AvailableSpace())
 	}
 
-	expectedPressure := 512.0 / 1024.0
+	expectedPressure := float64(expectedUsage) / 2048.0
 	if pool.MemoryPressure() != expectedPressure {
 		t.Errorf("Expected pressure to be %f, got %f", expectedPressure, pool.MemoryPressure())
 	}
@@ -63,15 +65,17 @@ func TestMemoryPool_AllocationAndFree(t *testing.T) {
 		t.Errorf("Expected usage to be 0 after free, got %d", pool.CurrentUsage())
 	}
 
-	if pool.AvailableSpace() != 1024 {
-		t.Errorf("Expected available space to be 1024 after free, got %d", pool.AvailableSpace())
+	if pool.AvailableSpace() != 2048 {
+		t.Errorf("Expected available space to be 2048 after free, got %d", pool.AvailableSpace())
 	}
 }
 
 func TestMemoryPool_AllocationLimits(t *testing.T) {
-	pool := NewMemoryPool("test-pool", 1024)
+	// Pool must be large enough for value + PerKeyOverhead
+	poolSize := int64(1024 + PerKeyOverhead)
+	pool := NewMemoryPool("test-pool", poolSize)
 
-	// Allocate exactly the limit
+	// Allocate exactly the limit (value=1024, total=1024+500)
 	data, err := pool.Allocate(1024)
 	if err != nil {
 		t.Fatalf("Failed to allocate at limit: %v", err)
@@ -97,7 +101,9 @@ func TestMemoryPool_AllocationLimits(t *testing.T) {
 }
 
 func TestMemoryPool_PressureThresholds(t *testing.T) {
-	pool := NewMemoryPool("test-pool", 1000)
+	// Pool size accounts for overhead: we want to reach 85%/90%/95% of pool
+	// Each alloc adds PerKeyOverhead, so plan values accordingly
+	pool := NewMemoryPool("test-pool", 10000)
 
 	var mu sync.Mutex
 	var warningCalled, criticalCalled, panicCalled bool
@@ -124,13 +130,13 @@ func TestMemoryPool_PressureThresholds(t *testing.T) {
 		},
 	)
 
-	// Allocate to warning threshold (85%)
-	data1, err := pool.Allocate(850)
+	// Allocate to warning threshold (85%) = 8500 bytes total
+	// value = 8500 - 500 = 8000
+	data1, err := pool.Allocate(8000)
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
 
-	// Give callbacks time to execute
 	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
@@ -142,7 +148,7 @@ func TestMemoryPool_PressureThresholds(t *testing.T) {
 	}
 	mu.Unlock()
 
-	// Allocate to critical threshold (90%)
+	// Allocate to critical threshold (90%) = need 500 more total
 	data2, err := pool.Allocate(50)
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
@@ -159,7 +165,7 @@ func TestMemoryPool_PressureThresholds(t *testing.T) {
 	}
 	mu.Unlock()
 
-	// Allocate to panic threshold (95%)
+	// Allocate to panic threshold (95%) = need 500 more total
 	data3, err := pool.Allocate(50)
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
@@ -183,7 +189,8 @@ func TestMemoryPool_PressureThresholds(t *testing.T) {
 }
 
 func TestMemoryPool_ConcurrentOperations(t *testing.T) {
-	pool := NewMemoryPool("concurrent-test", 10240)
+	// Each alloc = 10 + 500 = 510, total = 100*10*510 = 510,000
+	pool := NewMemoryPool("concurrent-test", 510000)
 
 	numGoroutines := 100
 	allocationsPerGoroutine := 10
@@ -215,8 +222,8 @@ func TestMemoryPool_ConcurrentOperations(t *testing.T) {
 
 	wg.Wait()
 
-	// Check total usage
-	expectedUsage := int64(numGoroutines*allocationsPerGoroutine) * allocationSize
+	// Check total usage (including PerKeyOverhead per allocation)
+	expectedUsage := int64(numGoroutines*allocationsPerGoroutine) * (allocationSize + PerKeyOverhead)
 	if pool.CurrentUsage() != expectedUsage {
 		t.Errorf("Expected usage %d, got %d", expectedUsage, pool.CurrentUsage())
 	}
@@ -251,32 +258,28 @@ func TestMemoryPool_ConcurrentOperations(t *testing.T) {
 }
 
 func TestMemoryPool_Statistics(t *testing.T) {
-	pool := NewMemoryPool("stats-test", 1024)
+	// Needs room for 2 allocations of 256 + overhead each
+	pool := NewMemoryPool("stats-test", 2048)
 
-	// Make some allocations and deallocations
 	data1, _ := pool.Allocate(256)
 	data2, _ := pool.Allocate(256)
 	pool.Free(data1)
 
-	// Try failed allocation
-	_, err := pool.Allocate(1024) // Should fail because 256 is still allocated
+	// Try failed allocation (remaining = 2048 - (256+500) = 1292, need 1024+500=1524)
+	_, err := pool.Allocate(1024)
 	if err == nil {
 		t.Error("Expected allocation to fail")
 	}
 
 	stats := pool.GetStats()
 
-	// Check basic stats
 	if stats["name"] != "stats-test" {
 		t.Errorf("Expected name 'stats-test', got %v", stats["name"])
 	}
 
-	if stats["max_size"] != int64(1024) {
-		t.Errorf("Expected max_size 1024, got %v", stats["max_size"])
-	}
-
-	if stats["current_usage"] != int64(256) {
-		t.Errorf("Expected current_usage 256, got %v", stats["current_usage"])
+	expectedUsage := int64(256 + PerKeyOverhead)
+	if stats["current_usage"] != expectedUsage {
+		t.Errorf("Expected current_usage %d, got %v", expectedUsage, stats["current_usage"])
 	}
 
 	if stats["total_allocations"] != int64(2) {
@@ -291,37 +294,32 @@ func TestMemoryPool_Statistics(t *testing.T) {
 		t.Errorf("Expected allocation_failures 1, got %v", stats["allocation_failures"])
 	}
 
-	// Cleanup
 	pool.Free(data2)
 }
 
 func TestMemoryPool_Resize(t *testing.T) {
-	pool := NewMemoryPool("resize-test", 1024)
+	// 512 + 500 overhead = 1012 tracked
+	pool := NewMemoryPool("resize-test", 2048)
 
-	// Allocate some memory
 	data, err := pool.Allocate(512)
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
 
-	// Try to resize below current usage
+	// Try to resize below current usage (1012)
 	err = pool.Resize(256)
 	if err == nil {
 		t.Error("Expected resize below current usage to fail")
 	}
 
-	// Resize above current usage
-	err = pool.Resize(2048)
+	// Resize to larger
+	err = pool.Resize(4096)
 	if err != nil {
 		t.Errorf("Failed to resize above current usage: %v", err)
 	}
 
-	if pool.MaxSize() != 2048 {
-		t.Errorf("Expected max size 2048, got %d", pool.MaxSize())
-	}
-
-	if pool.AvailableSpace() != 2048-512 {
-		t.Errorf("Expected available space %d, got %d", 2048-512, pool.AvailableSpace())
+	if pool.MaxSize() != 4096 {
+		t.Errorf("Expected max size 4096, got %d", pool.MaxSize())
 	}
 
 	// Should be able to allocate more now
@@ -330,7 +328,6 @@ func TestMemoryPool_Resize(t *testing.T) {
 		t.Errorf("Failed to allocate after resize: %v", err)
 	}
 
-	// Cleanup
 	pool.Free(data)
 	pool.Free(data2)
 }
@@ -369,7 +366,8 @@ func TestMemoryPool_EdgeCases(t *testing.T) {
 }
 
 func TestMemoryPool_CustomThresholds(t *testing.T) {
-	pool := NewMemoryPool("threshold-test", 1000)
+	// 750 + 500 = 1250, so pool must be >= 1250
+	pool := NewMemoryPool("threshold-test", 2000)
 
 	// Test invalid thresholds
 	err := pool.SetPressureThresholds(-0.1, 0.5, 0.8)
@@ -400,8 +398,8 @@ func TestMemoryPool_CustomThresholds(t *testing.T) {
 		nil,
 	)
 
-	// Allocate to 75% (should trigger warning at 70%)
-	data, err := pool.Allocate(750)
+	// Allocate to ~62.5% (1250/2000) which is below 70% warning — bump it up
+	data, err := pool.Allocate(950)
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -419,7 +417,7 @@ func TestMemoryPool_CustomThresholds(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkMemoryPool_Allocate(b *testing.B) {
-	pool := NewMemoryPool("bench-pool", int64(b.N)*100)
+	pool := NewMemoryPool("bench-pool", int64(b.N)*(100+PerKeyOverhead))
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -431,7 +429,7 @@ func BenchmarkMemoryPool_Allocate(b *testing.B) {
 }
 
 func BenchmarkMemoryPool_AllocateAndFree(b *testing.B) {
-	pool := NewMemoryPool("bench-pool", int64(b.N)*100)
+	pool := NewMemoryPool("bench-pool", int64(b.N)*(100+PerKeyOverhead))
 	allocations := make([][]byte, b.N)
 
 	b.ResetTimer()

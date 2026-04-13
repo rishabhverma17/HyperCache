@@ -41,27 +41,42 @@ func NewReadRepairer(coordinator CoordinatorService) *ReadRepairer {
 	}
 }
 
-// TryPeers attempts to fetch a key from other alive nodes in the cluster.
+// TryPeers attempts to fetch a key from replica nodes identified by the hash ring.
 // Returns on the first hit. This is called only when local GET misses,
-// covering the gossip propagation window.
+// covering the replication propagation window.
 func (rr *ReadRepairer) TryPeers(ctx context.Context, key string) *ReadRepairResult {
 	localNodeID := rr.coordinator.GetLocalNodeID()
-	membership := rr.coordinator.GetMembership()
-	if membership == nil {
-		return nil
+	routing := rr.coordinator.GetRouting()
+
+	// Use hash-ring to find the owner + replicas for this key
+	var candidates []string
+	if routing != nil {
+		candidates = routing.GetReplicas(key, 3) // check owner + replicas
 	}
 
-	members := membership.GetAliveNodes()
-	if len(members) <= 1 {
-		return nil // Only us in the cluster
+	// Fallback: if no routing or no candidates, try all alive nodes (backward compat)
+	if len(candidates) == 0 {
+		membership := rr.coordinator.GetMembership()
+		if membership == nil {
+			return nil
+		}
+		members := membership.GetAliveNodes()
+		if len(members) <= 1 {
+			return nil
+		}
+		for _, m := range members {
+			if m.NodeID != localNodeID {
+				candidates = append(candidates, m.NodeID)
+			}
+		}
 	}
 
-	for _, member := range members {
-		if member.NodeID == localNodeID {
+	for _, nodeID := range candidates {
+		if nodeID == localNodeID {
 			continue
 		}
 
-		addr := rr.coordinator.GetNodeHTTPAddress(member.NodeID)
+		addr := rr.coordinator.GetNodeHTTPAddress(nodeID)
 		if addr == "" {
 			continue
 		}
@@ -69,15 +84,15 @@ func (rr *ReadRepairer) TryPeers(ctx context.Context, key string) *ReadRepairRes
 		result, err := rr.fetchFromPeer(ctx, addr, key)
 		if err != nil {
 			logging.Debug(ctx, logging.ComponentCluster, "read_repair", "Peer fetch failed", map[string]interface{}{
-				"peer": member.NodeID, "key": key, "error": err.Error(),
+				"peer": nodeID, "key": key, "error": err.Error(),
 			})
 			continue
 		}
 
 		if result.Found {
-			result.Node = member.NodeID
+			result.Node = nodeID
 			logging.Info(ctx, logging.ComponentCluster, "read_repair", "Read-repair success: key found on peer", map[string]interface{}{
-				"peer": member.NodeID, "key": key,
+				"peer": nodeID, "key": key,
 			})
 			return result
 		}

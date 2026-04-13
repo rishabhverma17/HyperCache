@@ -25,6 +25,9 @@ type Server struct {
 	// Multi-store support
 	storeManager *storage.StoreManager
 
+	// Node communicator for hash-ring proxy/replication
+	nodeCommunicator *cluster.NodeCommunicator
+
 	// Connection management
 	connections map[net.Conn]*ClientConn
 	connMutex   sync.RWMutex
@@ -108,6 +111,11 @@ func NewServer(address string, store *storage.BasicStore, coord cluster.Coordina
 // SetStoreManager sets the multi-store manager for SELECT/CREATE/STORES commands.
 func (s *Server) SetStoreManager(sm *storage.StoreManager) {
 	s.storeManager = sm
+}
+
+// SetNodeCommunicator sets the node communicator for hash-ring proxying.
+func (s *Server) SetNodeCommunicator(nc *cluster.NodeCommunicator) {
+	s.nodeCommunicator = nc
 }
 
 // NewServerWithConfig creates a new RESP server with custom configuration
@@ -357,6 +365,12 @@ func (s *Server) routeCommand(clientConn *ClientConn, cmd Command) ([]byte, erro
 	case "STORES":
 		return s.handleStores(cmd)
 
+	// Compatibility stubs (redis-benchmark, redis-cli)
+	case "CONFIG":
+		return s.handleConfig(cmd)
+	case "COMMAND":
+		return s.handleCommand(cmd)
+
 	default:
 		return nil, fmt.Errorf("unknown command: %s", cmd.Name)
 	}
@@ -386,48 +400,56 @@ func (s *Server) handleGet(clientConn *ClientConn, cmd Command) ([]byte, error) 
 
 	key := cmd.Args[0]
 	store := s.getActiveStore(clientConn)
+	formatter := NewFormatter()
 
-	// DISTRIBUTED GET: Check local store first
-	value, err := store.Get(key)
-	if err == nil {
-		// Key found locally, return it
-		var bytes []byte
-		switch v := value.(type) {
-		case []byte:
-			bytes = v
-		case string:
-			bytes = []byte(v)
-		default:
-			// For other types, we can't handle them in RESP
-			formatter := NewFormatter()
-			return formatter.FormatNull(), nil
-		}
-
-		formatter := NewFormatter()
-		return formatter.FormatBulkBytes(bytes), nil
-	}
-
-	// Key not found locally - if we have a coordinator, check if we should have this key
+	// DISTRIBUTED GET with hash-ring routing
 	if s.coord != nil && s.coord.GetRouting() != nil {
 		routing := s.coord.GetRouting()
 
-		// Check if this node should be a replica for this key
-		if routing.IsReplica(key) || routing.IsLocal(key) {
-			// We should have this key but don't - it might not be replicated yet
-			// Return null for now (in production, could wait or check other replicas)
-			formatter := NewFormatter()
+		// Check if this node owns or replicates this key
+		if routing.IsLocal(key) || routing.IsReplica(key) {
+			// Fast path: use GetRawBytes to skip deserialization for strings
+			rawBytes, _, err := store.GetRawBytes(key)
+			if err == nil {
+				return formatter.FormatBulkBytes(rawBytes), nil
+			}
+			// Local miss on a key we should have — return null (replication lag)
 			return formatter.FormatNull(), nil
 		}
 
-		// This key belongs to other nodes - we should return null
-		// In a full implementation, we could forward the request to the appropriate node
-		formatter := NewFormatter()
+		// Key belongs to another node — proxy to the owner
+		if s.nodeCommunicator != nil {
+			ownerNode := routing.RouteKey(key)
+			if ownerNode != "" {
+				value, found, err := s.nodeCommunicator.ProxyGet(context.Background(), ownerNode, key)
+				if err == nil && found {
+					return s.formatGetValue(formatter, value), nil
+				}
+			}
+		}
+
 		return formatter.FormatNull(), nil
 	}
 
-	// No coordinator or key not found
-	formatter := NewFormatter()
-	return formatter.FormatNull(), nil
+	// Standalone mode — fast path via raw bytes
+	rawBytes, _, err := store.GetRawBytes(key)
+	if err != nil {
+		return formatter.FormatNull(), nil
+	}
+
+	return formatter.FormatBulkBytes(rawBytes), nil
+}
+
+// formatGetValue converts a value to RESP bulk string bytes
+func (s *Server) formatGetValue(formatter *Formatter, value interface{}) []byte {
+	switch v := value.(type) {
+	case []byte:
+		return formatter.FormatBulkBytes(v)
+	case string:
+		return formatter.FormatBulkBytes([]byte(v))
+	default:
+		return formatter.FormatNull()
+	}
 }
 
 func (s *Server) handleSet(clientConn *ClientConn, cmd Command) ([]byte, error) {
@@ -465,43 +487,67 @@ func (s *Server) handleSet(clientConn *ClientConn, cmd Command) ([]byte, error) 
 			ttl = time.Duration(millis) * time.Millisecond
 		case "NX", "XX":
 			// TODO: Implement conditional sets
-			// NX: Only set if key doesn't exist
-			// XX: Only set if key exists
 		default:
 			return nil, fmt.Errorf("syntax error")
 		}
 	}
 
-	// DISTRIBUTED SET: Store on all replica nodes
-	// Set value in local store first
+	formatter := NewFormatter()
+
+	// DISTRIBUTED SET with hash-ring routing
+	if s.coord != nil && s.coord.GetRouting() != nil {
+		routing := s.coord.GetRouting()
+
+		if !routing.IsLocal(key) && !routing.IsReplica(key) {
+			// This node is NOT the owner — proxy to the owner transparently
+			if s.nodeCommunicator != nil {
+				ownerNode := routing.RouteKey(key)
+				if ownerNode != "" {
+					err := s.nodeCommunicator.ProxySet(context.Background(), ownerNode, key, string(value), ttl.Seconds())
+					if err != nil {
+						return nil, fmt.Errorf("failed to proxy SET to owner %s: %w", ownerNode, err)
+					}
+					return formatter.FormatSimpleString("OK"), nil
+				}
+			}
+			return nil, fmt.Errorf("cannot route key: no owner found")
+		}
+
+		// We ARE the owner (or a replica) — write locally
+		err := store.Set(key, value, "", ttl)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set key locally: %w", err)
+		}
+
+		// Replicate to hash-ring replicas (async, fire-and-forget)
+		if s.nodeCommunicator != nil {
+			lamportTS := uint64(0)
+			if s.coord.GetClock() != nil {
+				lamportTS = s.coord.GetClock().Tick()
+			}
+
+			replicas := routing.GetReplicas(key, 3) // replication factor
+			go func() {
+				for _, replica := range replicas {
+					if replica == s.coord.GetLocalNodeID() {
+						continue
+					}
+					_ = s.nodeCommunicator.ReplicateEntry(
+						context.Background(), replica, key, string(value), ttl.Seconds(), lamportTS,
+					)
+				}
+			}()
+		}
+
+		return formatter.FormatSimpleString("OK"), nil
+	}
+
+	// Standalone mode — just write locally
 	err := store.Set(key, value, "", ttl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set key locally: %w", err)
 	}
 
-	// If we have a coordinator, broadcast SET event to replicas
-	if s.coord != nil && s.coord.GetEventBus() != nil {
-		eventBus := s.coord.GetEventBus()
-
-		// Create a SET event to be handled by other nodes
-		setEvent := cluster.ClusterEvent{
-			Type:      cluster.EventDataOperation,
-			NodeID:    s.coord.GetLocalNodeID(),
-			Timestamp: time.Now(),
-			Data: map[string]interface{}{
-				"operation": "SET",
-				"key":       key,
-				"value":     string(value),
-				"ttl":       ttl.Seconds(),
-			},
-		}
-
-		// Publish the event (other nodes will receive and apply it)
-		ctx := context.Background()
-		_ = eventBus.Publish(ctx, setEvent)
-	}
-
-	formatter := NewFormatter()
 	return formatter.FormatSimpleString("OK"), nil
 }
 
@@ -514,31 +560,48 @@ func (s *Server) handleDel(clientConn *ClientConn, cmd Command) ([]byte, error) 
 	store := s.getActiveStore(clientConn)
 
 	for _, key := range cmd.Args {
+		// Hash-ring routing for DEL
+		if s.coord != nil && s.coord.GetRouting() != nil {
+			routing := s.coord.GetRouting()
+			if !routing.IsLocal(key) && !routing.IsReplica(key) {
+				// Proxy to owner
+				if s.nodeCommunicator != nil {
+					ownerNode := routing.RouteKey(key)
+					if ownerNode != "" {
+						existed, err := s.nodeCommunicator.ProxyDelete(context.Background(), ownerNode, key)
+						if err == nil && existed {
+							deleted++
+						}
+						continue
+					}
+				}
+				continue
+			}
+		}
+
 		err := store.Delete(key)
 		if err == nil {
 			deleted++
 
-			// DISTRIBUTED DELETE: Broadcast DELETE event to replicas
-			if s.coord != nil && s.coord.GetEventBus() != nil {
-				eventBus := s.coord.GetEventBus()
-
-				// Create a DELETE event to be handled by other nodes
-				deleteEvent := cluster.ClusterEvent{
-					Type:      cluster.EventDataOperation,
-					NodeID:    s.coord.GetLocalNodeID(),
-					Timestamp: time.Now(),
-					Data: map[string]interface{}{
-						"operation": "DELETE",
-						"key":       key,
-					},
+			// Replicate DELETE to hash-ring replicas
+			if s.coord != nil && s.nodeCommunicator != nil && s.coord.GetRouting() != nil {
+				lamportTS := uint64(0)
+				if s.coord.GetClock() != nil {
+					lamportTS = s.coord.GetClock().Tick()
 				}
-
-				// Publish the event (other nodes will receive and apply it)
-				ctx := context.Background()
-				_ = eventBus.Publish(ctx, deleteEvent)
+				replicas := s.coord.GetRouting().GetReplicas(key, 3)
+				go func(k string, ts uint64, reps []string) {
+					for _, replica := range reps {
+						if replica == s.coord.GetLocalNodeID() {
+							continue
+						}
+						_ = s.nodeCommunicator.ReplicateEntry(
+							context.Background(), replica, k, nil, 0, ts,
+						)
+					}
+				}(key, lamportTS, replicas)
 			}
 		}
-		// Ignore errors for non-existent keys (Redis behavior)
 	}
 
 	formatter := NewFormatter()
@@ -554,11 +617,27 @@ func (s *Server) handleExists(clientConn *ClientConn, cmd Command) ([]byte, erro
 	store := s.getActiveStore(clientConn)
 
 	for _, key := range cmd.Args {
+		// Hash-ring routing
+		if s.coord != nil && s.coord.GetRouting() != nil {
+			routing := s.coord.GetRouting()
+			if !routing.IsLocal(key) && !routing.IsReplica(key) {
+				if s.nodeCommunicator != nil {
+					ownerNode := routing.RouteKey(key)
+					if ownerNode != "" {
+						val, found, err := s.nodeCommunicator.ProxyGet(context.Background(), ownerNode, key)
+						if err == nil && found && val != nil {
+							count++
+						}
+					}
+				}
+				continue
+			}
+		}
+
 		_, err := store.Get(key)
 		if err == nil {
 			count++
 		}
-		// Ignore errors for non-existent keys
 	}
 
 	formatter := NewFormatter()
@@ -647,6 +726,23 @@ func (s *Server) handleStats(cmd Command) ([]byte, error) {
 	return formatter.FormatArray(result), nil
 }
 
+// handleConfig returns empty results for CONFIG GET (redis-benchmark compatibility).
+func (s *Server) handleConfig(cmd Command) ([]byte, error) {
+	formatter := NewFormatter()
+	// CONFIG GET <param> → return empty array (no matching config)
+	// CONFIG SET/RESETSTAT/REWRITE → return OK
+	if len(cmd.Args) > 0 && strings.ToUpper(cmd.Args[0]) == "GET" {
+		return formatter.FormatArray(nil), nil
+	}
+	return formatter.FormatSimpleString("OK"), nil
+}
+
+// handleCommand returns empty results for COMMAND (redis-benchmark compatibility).
+func (s *Server) handleCommand(cmd Command) ([]byte, error) {
+	formatter := NewFormatter()
+	return formatter.FormatArray(nil), nil
+}
+
 func (s *Server) handleFlushAll(clientConn *ClientConn, cmd Command) ([]byte, error) {
 	store := s.getActiveStore(clientConn)
 	err := store.Clear()
@@ -673,7 +769,17 @@ func (s *Server) handleSelect(clientConn *ClientConn, cmd Command) ([]byte, erro
 
 	storeName := cmd.Args[0]
 
+	// Redis compatibility: SELECT 0 maps to "default" store
+	if storeName == "0" {
+		storeName = "default"
+	}
+
 	if s.storeManager == nil {
+		// Single-store mode: accept SELECT 0/default silently
+		if storeName == "default" {
+			formatter := NewFormatter()
+			return formatter.FormatSimpleString("OK"), nil
+		}
 		return nil, fmt.Errorf("multi-store not enabled")
 	}
 

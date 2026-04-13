@@ -10,6 +10,10 @@ import (
 	"hypercache/internal/logging"
 )
 
+// PerKeyOverhead is the estimated overhead per cache entry beyond the serialized value bytes.
+// Includes: Go map bucket (~200B), CacheItem struct (~200B), pointers, eviction policy entry.
+const PerKeyOverhead = 500
+
 // MemoryPool manages memory allocation for cache stores with pressure detection
 // This implementation provides O(1) operations and thread-safe memory management
 type MemoryPool struct {
@@ -63,25 +67,28 @@ func (mp *MemoryPool) Allocate(size int64) ([]byte, error) {
 		return nil, fmt.Errorf("invalid allocation size: %d", size)
 	}
 
+	// Account for per-key overhead in addition to value bytes
+	totalSize := size + PerKeyOverhead
+
 	// Check if allocation would exceed maximum
 	currentUsage := atomic.LoadInt64(&mp.currentUsage)
-	if currentUsage+size > mp.maxSize {
+	if currentUsage+totalSize > mp.maxSize {
 		atomic.AddInt64(&mp.allocationFailures, 1)
 		return nil, fmt.Errorf("allocation would exceed pool limit: %d + %d > %d",
-			currentUsage, size, mp.maxSize)
+			currentUsage, totalSize, mp.maxSize)
 	}
 
 	// Allocate memory
 	data := make([]byte, size)
 
-	// Track the allocation
+	// Track the allocation (track totalSize including overhead)
 	ptr := uintptr(unsafe.Pointer(&data[0]))
 	mp.mutex.Lock()
-	mp.allocations[ptr] = size
+	mp.allocations[ptr] = totalSize
 	mp.mutex.Unlock()
 
 	// Update usage atomically
-	newUsage := atomic.AddInt64(&mp.currentUsage, size)
+	newUsage := atomic.AddInt64(&mp.currentUsage, totalSize)
 	atomic.AddInt64(&mp.totalAllocations, 1)
 
 	// Check memory pressure and trigger callbacks if needed

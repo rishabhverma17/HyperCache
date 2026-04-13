@@ -34,19 +34,16 @@ func (s *BasicStore) StartPersistence(ctx context.Context) error {
 }
 
 // getSnapshotData returns current cache data for snapshot/compaction use.
-// Thread-safe: acquires read lock.
 func (s *BasicStore) getSnapshotData() map[string]interface{} {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-
-	data := make(map[string]interface{}, len(s.items))
-	for key, item := range s.items {
+	data := make(map[string]interface{})
+	s.data.RangeAll(func(key string, item *CacheItem) bool {
 		value, err := item.GetValue()
 		if err != nil {
-			continue
+			return true // continue
 		}
 		data[key] = value
-	}
+		return true
+	})
 	return data
 }
 
@@ -65,21 +62,7 @@ func (s *BasicStore) CreateSnapshot() error {
 		return fmt.Errorf("persistence not enabled")
 	}
 
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-
-	// Convert cache items to snapshot data
-	data := make(map[string]interface{})
-	for key, item := range s.items {
-		// For simplicity, convert back to original value
-		value, err := item.GetValue()
-		if err != nil {
-			logging.Warn(nil, logging.ComponentStorage, logging.ActionSnapshot, "Failed to get value for key during snapshot", map[string]interface{}{"key": key, "error": err.Error()})
-			continue
-		}
-		data[key] = value
-	}
-
+	data := s.getSnapshotData()
 	return s.persistEngine.CreateSnapshot(data)
 }
 
@@ -110,34 +93,24 @@ func (s *BasicStore) recoverFromPersistence() error {
 
 	logging.Info(nil, logging.ComponentStorage, logging.ActionRestore, "Recovering entries from persistence", map[string]interface{}{"entry_count": len(entries)})
 
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
 	recoveredCount := 0
 	errorCount := 0
 
 	for _, entry := range entries {
 		switch entry.Operation {
 		case "SET":
-			// AOF stores values as raw bytes without type info.
-			// Convert to string for recovery — this matches the original write path
-			// where most values come in as strings from RESP/HTTP.
 			value := string(entry.Value)
 
-			// Calculate TTL from entry
 			var ttl time.Duration
 			if entry.TTL > 0 {
-				// Check if item should have expired by now
 				createdAt := entry.Timestamp
 				expiresAt := createdAt.Add(time.Duration(entry.TTL) * time.Second)
 				if time.Now().After(expiresAt) {
-					// Skip expired items
 					continue
 				}
 				ttl = time.Until(expiresAt)
 			}
 
-			// Use internal set without persistence logging to avoid recursion
 			if err := s.setInternal(entry.Key, value, entry.SessionID, ttl); err != nil {
 				logging.Warn(nil, logging.ComponentStorage, logging.ActionRestore, "Failed to recover SET", map[string]interface{}{"key": entry.Key, "error": err.Error()})
 				errorCount++
@@ -146,8 +119,7 @@ func (s *BasicStore) recoverFromPersistence() error {
 			recoveredCount++
 
 		case "DEL":
-			// Delete the key if it exists
-			if _, exists := s.items[entry.Key]; exists {
+			if s.data.Exists(entry.Key) {
 				if err := s.deleteInternal(entry.Key); err != nil {
 					logging.Warn(nil, logging.ComponentStorage, logging.ActionRestore, "Failed to recover DEL", map[string]interface{}{"key": entry.Key, "error": err.Error()})
 					errorCount++
@@ -157,7 +129,6 @@ func (s *BasicStore) recoverFromPersistence() error {
 			}
 
 		case "CLEAR":
-			// Clear all items
 			s.clearInternal()
 			recoveredCount++
 		}
@@ -173,7 +144,6 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 		return fmt.Errorf("key cannot be empty")
 	}
 
-	// Serialize the value
 	serializedData, valueType, err := serializeValue(value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize value: %w", err)
@@ -181,27 +151,27 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 
 	size := uint64(len(serializedData))
 
-	// Allocate memory
 	allocatedMemory, err := s.memPool.Allocate(int64(size))
 	if err != nil {
 		return fmt.Errorf("failed to allocate memory: %w", err)
 	}
-
 	copy(allocatedMemory, serializedData)
 
-	// Handle existing item
-	if existingItem, exists := s.items[key]; exists {
-		if oldPtr, ptrExists := s.allocatedPtrs[key]; ptrExists {
+	// Handle existing item via ShardedMap
+	s.data.LockShard(key)
+	sh := s.data.getShard(key)
+	if existingItem, exists := sh.items[key]; exists {
+		if oldPtr, ptrExists := sh.allocatedPtrs[key]; ptrExists {
 			_ = s.memPool.Free(oldPtr)
-			delete(s.allocatedPtrs, key)
 		}
 		oldEntry := s.itemToEntry(key, existingItem)
 		s.evictPolicy.OnDelete(oldEntry)
-		s.stats.TotalItems--
-		s.stats.TotalMemory -= existingItem.Size
+		s.updateStats(func() {
+			s.stats.TotalItems--
+			s.stats.TotalMemory -= existingItem.Size
+		})
 	}
 
-	// Create new item
 	expiresAt := time.Time{}
 	if ttl > 0 {
 		expiresAt = time.Now().Add(ttl)
@@ -220,17 +190,18 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 		LamportTimestamp: 0,
 	}
 
-	// Store the item
-	s.items[key] = item
-	s.allocatedPtrs[key] = allocatedMemory
-	s.stats.TotalItems++
-	s.stats.TotalMemory += size
+	sh.items[key] = item
+	sh.allocatedPtrs[key] = allocatedMemory
+	s.data.UnlockShard(key)
 
-	// Add to eviction policy
+	s.updateStats(func() {
+		s.stats.TotalItems++
+		s.stats.TotalMemory += size
+	})
+
 	entry := s.itemToEntry(key, item)
 	s.evictPolicy.OnInsert(entry)
 
-	// Add to filter
 	if s.filter != nil {
 		_ = s.filter.Add([]byte(key))
 	}
@@ -240,27 +211,23 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 
 // deleteInternal is like Delete but without persistence logging (used for recovery)
 func (s *BasicStore) deleteInternal(key string) error {
-	item, exists := s.items[key]
-	if !exists {
+	item, allocPtr, existed := s.data.Delete(key)
+	if !existed {
 		return fmt.Errorf("key not found: %s", key)
 	}
 
-	// Free memory
-	if ptr, ptrExists := s.allocatedPtrs[key]; ptrExists {
-		_ = s.memPool.Free(ptr)
-		delete(s.allocatedPtrs, key)
+	if allocPtr != nil {
+		_ = s.memPool.Free(allocPtr)
 	}
 
-	// Remove from eviction policy
 	entry := s.itemToEntry(key, item)
 	s.evictPolicy.OnDelete(entry)
 
-	// Remove from items
-	delete(s.items, key)
-	s.stats.TotalItems--
-	s.stats.TotalMemory -= item.Size
+	s.updateStats(func() {
+		s.stats.TotalItems--
+		s.stats.TotalMemory -= item.Size
+	})
 
-	// Remove from filter
 	if s.filter != nil {
 		s.filter.Delete([]byte(key))
 	}
@@ -270,15 +237,19 @@ func (s *BasicStore) deleteInternal(key string) error {
 
 // clearInternal is like Clear but without persistence logging (used for recovery)
 func (s *BasicStore) clearInternal() {
-	// Free all allocated memory
-	for _, ptr := range s.allocatedPtrs {
-		_ = s.memPool.Free(ptr)
-	}
+	s.data.RangeAll(func(key string, item *CacheItem) bool {
+		if ptr, ok := s.data.GetAllocatedPtr(key); ok {
+			_ = s.memPool.Free(ptr)
+		}
+		return true
+	})
 
-	// Clear all data structures
-	s.items = make(map[string]*CacheItem)
-	s.allocatedPtrs = make(map[string][]byte)
+	s.data.Clear()
+
+	s.mutex.Lock()
 	s.stats.TotalItems = 0
 	s.stats.TotalMemory = 0
-	s.evictPolicy = cache.NewSessionEvictionPolicy() // Reset eviction policy
+	s.mutex.Unlock()
+
+	s.evictPolicy = cache.NewSessionEvictionPolicy()
 }

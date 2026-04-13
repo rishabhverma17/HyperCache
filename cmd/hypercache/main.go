@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -161,6 +163,9 @@ func main() {
 		defaultStore := storeManager.GetDefaultStore()
 
 		// Create distributed coordinator with configuration-driven clustering
+		// Resolve seed nodes — supports DNS-based discovery for K8s/Docker
+		resolvedSeeds := resolveSeeds(ctx, cfg.Cluster.Seeds, cfg.Cluster.SeedDNS, cfg.Cluster.SeedDNSPort, cfg.Network.GossipPort)
+
 		clusterConfig := cluster.ClusterConfig{
 			NodeID:                  cfg.Node.ID,
 			ClusterName:             "hypercache",
@@ -168,10 +173,11 @@ func main() {
 			BindPort:                cfg.Network.GossipPort,
 			AdvertiseAddress:        cfg.Network.AdvertiseAddr, // VM-specific IP for multi-VM
 			HTTPPort:                cfg.Network.HTTPPort,      // Shared via gossip for inter-node read-repair
-			SeedNodes:               cfg.Cluster.Seeds,
-			JoinTimeout:             30, // 30 seconds
-			HeartbeatInterval:       5,  // 5 seconds
-			FailureDetectionTimeout: 15, // 15 seconds (must be > heartbeat)
+			SeedNodes:               resolvedSeeds,
+			HashRing:                cluster.DefaultHashRingConfig(), // 256 vnodes, RF=3, xxhash64
+			JoinTimeout:             30,                              // 30 seconds
+			HeartbeatInterval:       5,                               // 5 seconds
+			FailureDetectionTimeout: 15,                              // 15 seconds (must be > heartbeat)
 		}
 
 		coord, err := cluster.NewDistributedCoordinator(clusterConfig)
@@ -220,6 +226,10 @@ func main() {
 		respServer := resp.NewServer(respBindAddr, defaultStore, coord)
 		respServer.SetStoreManager(storeManager)
 
+		// Create node communicator for hash-ring routing & replication
+		nodeCommunicator := cluster.NewNodeCommunicator(cfg.Node.ID, coord.GetMembership())
+		respServer.SetNodeCommunicator(nodeCommunicator)
+
 		// Start RESP server
 		go func() {
 			logging.Info(ctx, logging.ComponentRESP, logging.ActionStart, "RESP server listening", map[string]interface{}{"bind_addr": respBindAddr})
@@ -231,7 +241,7 @@ func main() {
 
 		// Start HTTP API server alongside RESP using configured port
 		go func() {
-			if err := startHTTPServer(shutdownCtx, coord, storeManager, cfg.Network.HTTPPort, cfg.Node.ID, cfg); err != nil {
+			if err := startHTTPServer(shutdownCtx, coord, storeManager, cfg.Network.HTTPPort, cfg.Node.ID, cfg, nodeCommunicator); err != nil {
 				logging.Error(ctx, logging.ComponentHTTP, logging.ActionStart, "HTTP API server error", err, nil)
 			}
 		}()
@@ -254,7 +264,7 @@ func main() {
 }
 
 // HTTP API Server for REST endpoints
-func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService, storeManager *storage.StoreManager, port int, nodeID string, cfg *config.Config) error {
+func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService, storeManager *storage.StoreManager, port int, nodeID string, cfg *config.Config, nodeCommunicator *cluster.NodeCommunicator) error {
 	mux := http.NewServeMux()
 
 	store := storeManager.GetDefaultStore()
@@ -333,8 +343,49 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 		json.NewEncoder(w).Encode(map[string]interface{}{"value": value})
 	})
 
+	// Internal endpoint: receive direct replication from hash-ring owner
+	mux.HandleFunc("/internal/replicate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			Key       string      `json:"key"`
+			Value     interface{} `json:"value"`
+			TTL       float64     `json:"ttl"`
+			LamportTS uint64      `json:"lamport_ts"`
+			FromNode  string      `json:"from_node"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if payload.Key == "" {
+			http.Error(w, "key is required", http.StatusBadRequest)
+			return
+		}
+
+		// Witness the remote clock
+		if coordinator.GetClock() != nil && payload.LamportTS > 0 {
+			coordinator.GetClock().Witness(payload.LamportTS)
+		}
+
+		if payload.Value == nil {
+			// This is a DELETE replication
+			_ = store.Delete(payload.Key)
+		} else {
+			ttl := time.Duration(payload.TTL) * time.Second
+			_, _ = store.SetWithTimestamp(r.Context(), payload.Key, payload.Value, "replication", ttl, payload.LamportTS)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	})
+
 	// Cache operations with middleware
-	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID, readRepairer))))
+	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID, readRepairer, nodeCommunicator))))
 
 	// Cuckoo filter endpoints
 	mux.HandleFunc("/api/filter/stats", func(w http.ResponseWriter, r *http.Request) {
@@ -575,7 +626,7 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 	}
 }
 
-func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.BasicStore, nodeID string, readRepairer *cluster.ReadRepairer) http.HandlerFunc {
+func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.BasicStore, nodeID string, readRepairer *cluster.ReadRepairer, nodeCommunicator *cluster.NodeCommunicator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract key from URL path
 		path := strings.TrimPrefix(r.URL.Path, "/api/cache/")
@@ -585,6 +636,75 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 		}
 
 		key := path
+
+		// Check if this request was already proxied (prevent infinite loops)
+		isProxied := r.Header.Get("X-HyperCache-Proxied") == "true"
+
+		// Hash-ring routing: check if this node owns the key
+		if !isProxied && coordinator != nil && coordinator.GetRouting() != nil && nodeCommunicator != nil {
+			routing := coordinator.GetRouting()
+			if !routing.IsLocal(key) && !routing.IsReplica(key) {
+				ownerNode := routing.RouteKey(key)
+				if ownerNode != "" {
+					switch r.Method {
+					case http.MethodGet:
+						value, found, err := nodeCommunicator.ProxyGet(r.Context(), ownerNode, key)
+						if err != nil || !found {
+							w.WriteHeader(http.StatusNotFound)
+							json.NewEncoder(w).Encode(map[string]interface{}{
+								"success": false, "error": "Key not found", "key": key, "node": nodeID,
+								"routed_to": ownerNode, "correlation_id": logging.GetCorrelationID(r.Context()),
+							})
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						json.NewEncoder(w).Encode(map[string]interface{}{
+							"success": true,
+							"data":    map[string]interface{}{"key": key, "value": value},
+							"node":    nodeID, "routed_to": ownerNode, "local": false,
+							"correlation_id": logging.GetCorrelationID(r.Context()),
+						})
+						return
+
+					case http.MethodPut:
+						var requestBody struct {
+							Value interface{} `json:"value"`
+						}
+						if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+							http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+							return
+						}
+						err := nodeCommunicator.ProxySet(r.Context(), ownerNode, key, requestBody.Value, 3600)
+						if err != nil {
+							http.Error(w, fmt.Sprintf("Failed to route SET: %v", err), http.StatusBadGateway)
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						json.NewEncoder(w).Encode(map[string]interface{}{
+							"success": true, "message": "Key set successfully",
+							"data": map[string]interface{}{"key": key, "value": requestBody.Value},
+							"node": nodeID, "routed_to": ownerNode, "replicated": true,
+							"correlation_id": logging.GetCorrelationID(r.Context()),
+						})
+						return
+
+					case http.MethodDelete:
+						existed, err := nodeCommunicator.ProxyDelete(r.Context(), ownerNode, key)
+						if err != nil {
+							http.Error(w, fmt.Sprintf("Failed to route DELETE: %v", err), http.StatusBadGateway)
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						json.NewEncoder(w).Encode(map[string]interface{}{
+							"success": true, "existed": existed, "key": key,
+							"node": nodeID, "routed_to": ownerNode,
+							"correlation_id": logging.GetCorrelationID(r.Context()),
+						})
+						return
+					}
+				}
+			}
+		}
 
 		switch r.Method {
 		case http.MethodGet:
@@ -701,52 +821,32 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 			})
 
 			// Publish SET event to event bus for replication to other nodes
-			if coordinator != nil && coordinator.GetEventBus() != nil {
-				eventBus := coordinator.GetEventBus()
-
-				// Create SET event with correlation ID
-				// Tick the Lamport clock for this write
+			// Use hash-ring targeted replication instead of gossip broadcast
+			if coordinator != nil && nodeCommunicator != nil && coordinator.GetRouting() != nil {
 				lamportTS := uint64(0)
 				if coordinator.GetClock() != nil {
 					lamportTS = coordinator.GetClock().Tick()
 				}
 
-				setEvent := cluster.ClusterEvent{
-					Type:          cluster.EventDataOperation,
-					NodeID:        nodeID,
-					CorrelationID: logging.GetCorrelationID(r.Context()),
-					Timestamp:     time.Now(),
-					Data: map[string]interface{}{
-						"operation":  "SET",
-						"key":        key,
-						"value":      requestBody.Value,
-						"ttl":        ttl.Seconds(),
-						"lamport_ts": lamportTS,
-					},
-				}
+				replicas := coordinator.GetRouting().GetReplicas(key, 3)
+				go func() {
+					for _, replica := range replicas {
+						if replica == nodeID {
+							continue
+						}
+						if err := nodeCommunicator.ReplicateEntry(
+							context.Background(), replica, key, requestBody.Value, ttl.Seconds(), lamportTS,
+						); err != nil {
+							logging.Error(context.Background(), logging.ComponentCluster, logging.ActionReplication, "SET replication failed", err, map[string]interface{}{
+								"key": key, "target": replica,
+							})
+						}
+					}
+				}()
 
-				// Publish event for other nodes to process
-				logging.Debug(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "Publishing SET event for replication", map[string]interface{}{
-					"key":       key,
-					"node_id":   nodeID,
-					"operation": "SET",
-				})
-
-				if pubErr := eventBus.Publish(r.Context(), setEvent); pubErr != nil {
-					logging.Error(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "Failed to publish SET event", pubErr, map[string]interface{}{
-						"key":       key,
-						"operation": "SET",
-					})
-				} else {
-					logging.Info(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "SET event published for replication", map[string]interface{}{
-						"key":       key,
-						"operation": "SET",
-					})
-				}
-			} else {
-				logging.Warn(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "Event bus not available - no replication", map[string]interface{}{
-					"key":       key,
-					"operation": "SET",
+				logging.Info(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "SET replicated via hash ring", map[string]interface{}{
+					"key":      key,
+					"replicas": replicas,
 				})
 			}
 
@@ -788,54 +888,37 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				})
 			}
 
-			// Publish DELETE event to event bus for replication to other nodes
-			if existed && coordinator != nil && coordinator.GetEventBus() != nil {
-				eventBus := coordinator.GetEventBus()
-
-				// Tick the Lamport clock for this delete
+			// Publish DELETE event — hash-ring targeted replication
+			// Always replicate deletes (even if key wasn't found locally, it may exist on replicas)
+			if coordinator != nil && nodeCommunicator != nil && coordinator.GetRouting() != nil {
 				lamportTS := uint64(0)
 				if coordinator.GetClock() != nil {
 					lamportTS = coordinator.GetClock().Tick()
 				}
 
-				// Create DELETE event with correlation ID
-				deleteEvent := cluster.ClusterEvent{
-					Type:          cluster.EventDataOperation,
-					NodeID:        nodeID,
-					CorrelationID: logging.GetCorrelationID(r.Context()),
-					Timestamp:     time.Now(),
-					Data: map[string]interface{}{
-						"operation":  "DELETE",
-						"key":        key,
-						"lamport_ts": lamportTS,
-					},
-				}
+				replicas := coordinator.GetRouting().GetReplicas(key, 3)
+				go func() {
+					for _, replica := range replicas {
+						if replica == nodeID {
+							continue
+						}
+						if err := nodeCommunicator.ReplicateEntry(
+							context.Background(), replica, key, nil, 0, lamportTS,
+						); err != nil {
+							logging.Error(context.Background(), logging.ComponentCluster, logging.ActionReplication, "DELETE replication failed", err, map[string]interface{}{
+								"key": key, "target": replica,
+							})
+						}
+					}
+				}()
 
-				// Log replication attempt
-				logging.Debug(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "Publishing DELETE event for replication", map[string]interface{}{
-					"key":       key,
-					"node_id":   nodeID,
-					"operation": "DELETE",
-				})
-
-				// Publish event for other nodes to process
-				if pubErr := eventBus.Publish(r.Context(), deleteEvent); pubErr != nil {
-					logging.Error(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "Failed to publish DELETE event", pubErr, map[string]interface{}{
-						"key":       key,
-						"operation": "DELETE",
-					})
-				} else {
-					logging.Info(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "DELETE event published for replication", map[string]interface{}{
-						"key":       key,
-						"operation": "DELETE",
-					})
-				}
-			} else if existed {
-				logging.Warn(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "Event bus not available - no replication", map[string]interface{}{
-					"key":       key,
-					"operation": "DELETE",
+				logging.Info(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "DELETE replicated via hash ring", map[string]interface{}{
+					"key":      key,
+					"replicas": replicas,
 				})
 			}
+
+			replicated := coordinator != nil && coordinator.GetRouting() != nil && nodeCommunicator != nil
 
 			response := map[string]interface{}{
 				"success":        true,
@@ -843,7 +926,7 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				"existed":        existed,
 				"key":            key,
 				"node":           nodeID,
-				"replicated":     existed,
+				"replicated":     replicated,
 				"correlation_id": logging.GetCorrelationID(r.Context()),
 			}
 
@@ -1166,4 +1249,80 @@ func handleReplicationEvent(ctx context.Context, event cluster.ClusterEvent, sto
 			})
 		}
 	}
+}
+
+// resolveSeeds resolves seed node addresses using DNS-based discovery.
+// Supports three modes:
+//  1. Static seeds — IP:port entries from config (passed through unchanged)
+//  2. DNS discovery — if seedDNS is set, resolve the hostname to get all A records
+//  3. Hostname seeds — if a seed entry doesn't contain ":", resolve as hostname
+//
+// In Kubernetes, set seed_dns to a headless Service name (e.g. "hypercache-headless.default.svc.cluster.local")
+// and it will resolve to all Pod IPs in the StatefulSet.
+// In Docker Compose, service names (e.g. "node-1") resolve via Docker's embedded DNS.
+func resolveSeeds(ctx context.Context, staticSeeds []string, seedDNS string, seedDNSPort int, defaultGossipPort int) []string {
+	var resolved []string
+
+	// 1. DNS-based discovery (highest priority)
+	if seedDNS != "" {
+		port := seedDNSPort
+		if port == 0 {
+			port = defaultGossipPort
+		}
+
+		ips, err := net.LookupHost(seedDNS)
+		if err != nil {
+			logging.Warn(ctx, logging.ComponentCluster, logging.ActionStart, "DNS seed discovery failed", map[string]interface{}{
+				"dns":   seedDNS,
+				"error": err.Error(),
+			})
+		} else {
+			for _, ip := range ips {
+				addr := net.JoinHostPort(ip, strconv.Itoa(port))
+				resolved = append(resolved, addr)
+			}
+			logging.Info(ctx, logging.ComponentCluster, logging.ActionStart, "DNS seed discovery resolved", map[string]interface{}{
+				"dns":      seedDNS,
+				"resolved": resolved,
+				"count":    len(resolved),
+			})
+		}
+	}
+
+	// 2. Static seeds — resolve hostnames that don't have ports
+	for _, seed := range staticSeeds {
+		if seed == "" {
+			continue
+		}
+
+		// If it already has a port (host:port), pass through
+		if strings.Contains(seed, ":") {
+			resolved = append(resolved, seed)
+			continue
+		}
+
+		// Bare hostname — resolve and attach gossip port
+		ips, err := net.LookupHost(seed)
+		if err != nil {
+			// Maybe it's an IP without port — attach default port
+			resolved = append(resolved, net.JoinHostPort(seed, strconv.Itoa(defaultGossipPort)))
+			continue
+		}
+
+		for _, ip := range ips {
+			resolved = append(resolved, net.JoinHostPort(ip, strconv.Itoa(defaultGossipPort)))
+		}
+	}
+
+	// Deduplicate
+	seen := make(map[string]struct{})
+	deduped := make([]string, 0, len(resolved))
+	for _, addr := range resolved {
+		if _, exists := seen[addr]; !exists {
+			seen[addr] = struct{}{}
+			deduped = append(deduped, addr)
+		}
+	}
+
+	return deduped
 }

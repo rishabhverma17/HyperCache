@@ -37,9 +37,25 @@ test-coverage-html: test-unit
 	$(GO) tool cover -html=test-results/coverage.out -o test-results/coverage.html
 	@echo "Coverage report: test-results/coverage.html"
 
-## bench: Run benchmarks
+## bench: Run micro-benchmarks (caps each at 3s to avoid runaway iterations)
 bench:
-	$(GO) test -bench=. -benchmem ./internal/...
+	$(GO) test -bench=. -benchmem -benchtime=3s -timeout=10m ./internal/...
+
+## bench-production: Run production benchmark suite (persistence, workloads, payload sizes, GC pressure)
+bench-production:
+	$(GO) test -bench=. -benchmem -benchtime=1s -timeout=30m -run=^$$ ./tests/benchmarks/...
+
+## bench-server: Run redis-benchmark against a live HyperCache server (no Docker needed)
+bench-server:
+	bash scripts/run-server-benchmarks.sh
+
+## stress: Run stress tests (memory exhaustion, thundering herd, persistence recovery, sustained load)
+stress:
+	$(GO) test -v -timeout=10m ./tests/stress/...
+
+## stress-long: Run extended stress tests (set STRESS_DURATION for sustained load, default 5min)
+stress-long:
+	STRESS_DURATION=5m $(GO) test -v -timeout=30m -run=TestStress ./tests/stress/...
 
 ## lint: Run golangci-lint
 lint:

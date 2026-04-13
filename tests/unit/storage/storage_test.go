@@ -96,7 +96,7 @@ func TestBasicStore(t *testing.T) {
 		capacity := 5
 		config := storage.BasicStoreConfig{
 			Name:             "test-store-capacity",
-			MaxMemory:        500, // Reasonable memory limit to allow initial storage, then trigger evictions
+			MaxMemory:        50000, // Large enough for several keys with per-key overhead
 			DefaultTTL:       5 * time.Minute,
 			EnableStatistics: true,
 			CleanupInterval:  30 * time.Second,
@@ -211,7 +211,7 @@ func TestBasicStore(t *testing.T) {
 
 func TestMemoryPool(t *testing.T) {
 	t.Run("Basic_Pool_Operations", func(t *testing.T) {
-		pool := storage.NewMemoryPool("test-pool", 1024) // 1KB pool
+		pool := storage.NewMemoryPool("test-pool", 4096) // 4KB pool
 
 		// Allocate a block
 		block, err := pool.Allocate(512)
@@ -243,13 +243,15 @@ func TestMemoryPool(t *testing.T) {
 	})
 
 	t.Run("Pool_Exhaustion", func(t *testing.T) {
-		pool := storage.NewMemoryPool("small-pool", 100) // Small pool: 100 bytes
+		// Each alloc adds PerKeyOverhead (500), so pool must be large enough
+		pool := storage.NewMemoryPool("small-pool", 3000) // 3000 bytes
 
-		// Allocate most of the pool
+		// Allocate most of the pool (60 + 500 = 560)
 		block1, err := pool.Allocate(60)
 		if err != nil {
 			t.Errorf("Failed to allocate block1: %v", err)
 		}
+		// Another allocation (30 + 500 = 530)
 		block2, err := pool.Allocate(30)
 		if err != nil {
 			t.Errorf("Failed to allocate block2: %v", err)
@@ -259,8 +261,8 @@ func TestMemoryPool(t *testing.T) {
 			t.Errorf("Should be able to allocate blocks")
 		}
 
-		// Try to allocate more than remaining capacity - should fail
-		_, err = pool.Allocate(20)
+		// Remaining = 3000 - 1090 = 1910, try allocate 2000+500=2500 which should fail
+		_, err = pool.Allocate(2000)
 		if err == nil {
 			t.Errorf("Should not be able to allocate beyond pool capacity")
 		}
@@ -282,15 +284,15 @@ func TestMemoryPool(t *testing.T) {
 	})
 
 	t.Run("Pool_Statistics", func(t *testing.T) {
-		pool := storage.NewMemoryPool("stats-pool", 1024)
+		pool := storage.NewMemoryPool("stats-pool", 10240)
 
 		initialStats := pool.GetStats()
 		if initialStats["current_usage"].(int64) != 0 {
 			t.Errorf("Expected 0 current usage initially, got %d", initialStats["current_usage"])
 		}
 
-		if initialStats["max_size"].(int64) != 1024 {
-			t.Errorf("Expected max size 1024, got %d", initialStats["max_size"])
+		if initialStats["max_size"].(int64) != 10240 {
+			t.Errorf("Expected max size 10240, got %d", initialStats["max_size"])
 		}
 
 		// Allocate some memory
