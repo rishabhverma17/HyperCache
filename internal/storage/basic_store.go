@@ -760,33 +760,6 @@ func (s *BasicStore) Close() error {
 	return nil
 }
 
-// evictForSpace tries to evict items to make space for new allocation (kept for backward compat)
-func (s *BasicStore) evictForSpace(neededSize uint64) error {
-	// Evict expired items first
-	expired := s.data.CollectExpired(func(item *CacheItem) bool { return item.IsExpired() })
-	for _, key := range expired {
-		_ = s.Delete(key)
-	}
-	if s.memPool.AvailableSpace() >= int64(neededSize) {
-		return nil
-	}
-
-	// Use eviction policy to find candidates
-	for i := 0; i < 10 && s.memPool.AvailableSpace() < int64(neededSize); i++ {
-		candidate := s.evictPolicy.NextEvictionCandidate()
-		if candidate == nil {
-			break
-		}
-		key := string(candidate.Key)
-		_ = s.Delete(key)
-	}
-
-	if s.memPool.AvailableSpace() < int64(neededSize) {
-		return fmt.Errorf("unable to evict enough items to make space")
-	}
-	return nil
-}
-
 // cleanupExpiredItems runs periodic cleanup of expired items
 func (s *BasicStore) cleanupExpiredItems() {
 	ticker := time.NewTicker(s.config.CleanupInterval)
@@ -824,11 +797,6 @@ func (s *BasicStore) incrementErrorCount() {
 	s.mutex.Unlock()
 }
 
-// incrementErrorCountUnsafe increments error count without locking (caller must hold lock)
-func (s *BasicStore) incrementErrorCountUnsafe() {
-	s.stats.ErrorCount++
-}
-
 // itemToEntry converts a CacheItem to an Entry for the eviction policy
 func (s *BasicStore) itemToEntry(key string, item *CacheItem) *cache.Entry {
 	// Get the actual value for the entry (used by eviction policy)
@@ -849,28 +817,4 @@ func (s *BasicStore) itemToEntry(key string, item *CacheItem) *cache.Entry {
 		Timestamp: item.CreatedAt.Unix(),
 		StoreID:   s.config.Name,
 	}
-}
-
-// evictExpiredItemsSafe evicts expired items (thread-safe, uses ShardedMap)
-func (s *BasicStore) evictExpiredItemsSafe() uint64 {
-	expired := s.data.CollectExpired(func(item *CacheItem) bool { return item.IsExpired() })
-	for _, key := range expired {
-		_ = s.Delete(key)
-	}
-	return uint64(len(expired))
-}
-
-// evictLeastAccessedSafe evicts least accessed items (thread-safe)
-func (s *BasicStore) evictLeastAccessedSafe(count uint64) uint64 {
-	evicted := uint64(0)
-	for i := uint64(0); i < count; i++ {
-		candidate := s.evictPolicy.NextEvictionCandidate()
-		if candidate == nil {
-			break
-		}
-		key := string(candidate.Key)
-		_ = s.Delete(key)
-		evicted++
-	}
-	return evicted
 }

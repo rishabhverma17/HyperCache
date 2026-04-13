@@ -454,9 +454,6 @@ func BenchmarkConcurrencyScaling(b *testing.B) {
 			}
 
 			b.SetParallelism(numG / runtime.GOMAXPROCS(0))
-			if b.N < numG {
-				b.N = numG
-			}
 			b.ResetTimer()
 
 			var ops int64
