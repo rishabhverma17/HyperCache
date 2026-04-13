@@ -101,7 +101,7 @@ type BasicStore struct {
 	// Background eviction
 	evictSignal chan struct{} // Signal background evictor to run
 	evictDone   chan struct{} // Closed when background evictor exits
-	closing     atomic.Bool  // Set to true during Close() to prevent sends on closed channels
+	closing     atomic.Bool   // Set to true during Close() to prevent sends on closed channels
 
 	// Background AOF
 	aofChan chan *persistence.LogEntry // Buffered channel for async AOF writes
