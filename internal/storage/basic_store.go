@@ -104,8 +104,9 @@ type BasicStore struct {
 	closing     atomic.Bool   // Set to true during Close() to prevent sends on closed channels
 
 	// Background AOF
-	aofChan chan *persistence.LogEntry // Buffered channel for async AOF writes
-	aofDone chan struct{}              // Closed when AOF goroutine exits
+	aofChan      chan *persistence.LogEntry // Buffered channel for async AOF writes
+	aofDone      chan struct{}              // Closed when AOF goroutine exits
+	aofCloseOnce sync.Once                  // Ensures aofChan is closed exactly once
 }
 
 // serializeValue converts interface{} values to []byte for storage in allocated memory
@@ -668,13 +669,12 @@ func (s *BasicStore) backgroundAOFWriter() {
 
 // Clear removes all items from the cache
 func (s *BasicStore) Clear() error {
-	// Free all memory across shards
+	// Free all memory across shards — skip eviction policy updates for performance
+	// (we're clearing everything, no need to maintain eviction order)
 	s.data.RangeAll(func(key string, item *CacheItem) bool {
 		if ptr, ok := s.data.GetAllocatedPtr(key); ok {
 			_ = s.memPool.Free(ptr)
 		}
-		entry := s.itemToEntry(key, item)
-		s.evictPolicy.OnDelete(entry)
 		return true
 	})
 
@@ -758,8 +758,8 @@ func (s *BasicStore) Close() error {
 	close(s.evictSignal)
 	<-s.evictDone
 
-	// Close AOF channel and wait for drain
-	close(s.aofChan)
+	// Close AOF channel and wait for background writer to drain all entries
+	s.aofCloseOnce.Do(func() { close(s.aofChan) })
 	<-s.aofDone
 
 	// Flush persistence engine to ensure all buffered writes hit disk
