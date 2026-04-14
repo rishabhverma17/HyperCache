@@ -328,11 +328,15 @@ func (sm *StoreManager) createStoreInternal(storeCfg config.StoreConfig) (*Basic
 	// Build filter config
 	var filterCfg *filter.FilterConfig
 	if storeCfg.IsCuckooFilterEnabled() {
+		fpp := sm.globalCacheConfig.CuckooFilterFPP
+		if fpp <= 0 || fpp >= 1 {
+			fpp = 0.01 // Default 1% false positive rate
+		}
 		filterCfg = &filter.FilterConfig{
 			Name:              storeCfg.Name,
 			FilterType:        "cuckoo",
 			ExpectedItems:     1000000,
-			FalsePositiveRate: sm.globalCacheConfig.CuckooFilterFPP,
+			FalsePositiveRate: fpp,
 			FingerprintSize:   12,
 			BucketSize:        4,
 			EnableAutoResize:  true,

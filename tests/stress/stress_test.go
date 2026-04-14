@@ -431,9 +431,9 @@ func TestStress_RapidCreateDropStores(t *testing.T) {
 	}
 
 	remaining := mgr.ListStores()
-	t.Logf("After %d create/drop cycles: %d stores remaining (expected: 1 [default])", cycles, len(remaining))
-	if len(remaining) != 1 {
-		t.Errorf("FAIL: Expected 1 store (default), got %d", len(remaining))
+	t.Logf("After %d create/drop cycles: %d stores remaining (expected: 0)", cycles, len(remaining))
+	if len(remaining) != 0 {
+		t.Errorf("FAIL: Expected 0 stores after dropping all, got %d", len(remaining))
 	}
 }
 
