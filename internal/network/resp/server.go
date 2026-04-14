@@ -583,23 +583,21 @@ func (s *Server) handleDel(clientConn *ClientConn, cmd Command) ([]byte, error) 
 		if err == nil {
 			deleted++
 
-			// Replicate DELETE to hash-ring replicas
+			// Replicate DELETE to hash-ring replicas (synchronous for consistency)
 			if s.coord != nil && s.nodeCommunicator != nil && s.coord.GetRouting() != nil {
 				lamportTS := uint64(0)
 				if s.coord.GetClock() != nil {
 					lamportTS = s.coord.GetClock().Tick()
 				}
 				replicas := s.coord.GetRouting().GetReplicas(key, 3)
-				go func(k string, ts uint64, reps []string) {
-					for _, replica := range reps {
-						if replica == s.coord.GetLocalNodeID() {
-							continue
-						}
-						_ = s.nodeCommunicator.ReplicateEntry(
-							context.Background(), replica, k, nil, 0, ts,
-						)
+				for _, replica := range replicas {
+					if replica == s.coord.GetLocalNodeID() {
+						continue
 					}
-				}(key, lamportTS, replicas)
+					_ = s.nodeCommunicator.ReplicateEntry(
+						context.Background(), replica, key, nil, 0, lamportTS,
+					)
+				}
 			}
 		}
 	}

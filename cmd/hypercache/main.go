@@ -888,7 +888,8 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				})
 			}
 
-			// Publish DELETE event — hash-ring targeted replication
+			// Publish DELETE event — hash-ring targeted replication (synchronous)
+			// DELETEs are replicated synchronously to ensure consistency before responding.
 			// Always replicate deletes (even if key wasn't found locally, it may exist on replicas)
 			if coordinator != nil && nodeCommunicator != nil && coordinator.GetRouting() != nil {
 				lamportTS := uint64(0)
@@ -897,20 +898,18 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				}
 
 				replicas := coordinator.GetRouting().GetReplicas(key, 3)
-				go func() {
-					for _, replica := range replicas {
-						if replica == nodeID {
-							continue
-						}
-						if err := nodeCommunicator.ReplicateEntry(
-							context.Background(), replica, key, nil, 0, lamportTS,
-						); err != nil {
-							logging.Error(context.Background(), logging.ComponentCluster, logging.ActionReplication, "DELETE replication failed", err, map[string]interface{}{
-								"key": key, "target": replica,
-							})
-						}
+				for _, replica := range replicas {
+					if replica == nodeID {
+						continue
 					}
-				}()
+					if err := nodeCommunicator.ReplicateEntry(
+						context.Background(), replica, key, nil, 0, lamportTS,
+					); err != nil {
+						logging.Error(r.Context(), logging.ComponentCluster, logging.ActionReplication, "DELETE replication failed", err, map[string]interface{}{
+							"key": key, "target": replica,
+						})
+					}
+				}
 
 				logging.Info(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "DELETE replicated via hash ring", map[string]interface{}{
 					"key":      key,
