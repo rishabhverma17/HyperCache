@@ -336,11 +336,19 @@ Random key workload (500K unique keys, pipeline=16) runs at **2,823 SET/s** — 
 
 ## Priority Action Items for Productionization
 
-### P0 (Must fix — these make or break the pitch)
+### P0 (Must fix — these make or break the pitch) — ALL COMPLETE ✅
 1. ~~**Eviction under lock collapse**~~ — ✅ **FIXED**: Background evictor goroutine. Eviction never blocks the SET/GET hot path. Memory pressure signals the evictor asynchronously.
 2. ~~**Serialization bypass for strings**~~ — ✅ **FIXED**: `GetRawBytes()` returns stored bytes directly without deserialization. RESP `handleGet` uses raw bytes path — zero `string(data)` allocations on the hot path. `serializeValue` already bypasses `json.Marshal` for string/[]byte.
 3. ~~**Memory tracking gap**~~ — ✅ **FIXED**: `PerKeyOverhead` constant (500 bytes) added to every allocation. Allocate() now tracks `size + 500` to account for Go map bucket, CacheItem struct, and pointers.
 4. ~~**Sharded locks**~~ — ✅ **FIXED**: `ShardedMap` with 32 independent lock shards via `xxhash`. Each key locks only its shard. Eliminates the global lock ceiling.
+
+### Architecture Improvements (Done alongside P0)
+- ~~**Full replication → Hash-ring routing**~~ — ✅ Keys route to owner via consistent hashing. Non-owner nodes transparently proxy. Replicates to N replicas (not all nodes).
+- ~~**Gossip data replication → Direct HTTP**~~ — ✅ Gossip used only for node discovery/health. Data replication via `POST /internal/replicate`.
+- ~~**Background AOF writes**~~ — ✅ 10K buffered channel. AOF completely off the SET critical path.
+- ~~**DNS-based seed discovery**~~ — ✅ `seed_dns` config for K8s headless Services and Docker service names.
+- ~~**Synchronous DELETE replication**~~ — ✅ DELETEs replicate synchronously for consistency.
+- ~~**CuckooFilter FPP default**~~ — ✅ Defaults to 0.01 when unset, preventing cuckoo filter creation failures.
 
 ### P1 (Should fix for credibility)
 5. **Authentication** — at least `requirepass` for RESP and API key for HTTP
@@ -349,10 +357,12 @@ Random key workload (500K unique keys, pipeline=16) runs at **2,823 SET/s** — 
 8. **Config validation CLI** — `hypercache config validate <path>`
 9. **.tmp file cleanup** — orphaned snapshot temps on startup
 10. **RESP connection reuse bug** — redis-benchmark non-pipelined tests fail because the parser breaks after CONFIG response on the same connection
+11. **Quorum writes** — `consistency_level: "quorum"` to wait for N replica ACKs before returning OK
+12. **Random-key eviction performance** — probabilistic sampling (Redis-style) instead of linked-list walk
 
 ### P2 (Nice to have)
-11. **TLS support** — at least for client connections
-12. **Document consistency model** — what guarantees users actually get
-13. **Active key migration** — reduce miss window during rebalance
-14. **Slow query log** — like Redis `SLOWLOG`
-15. **`MEMORY USAGE <key>`** — per-key memory analysis
+13. **TLS support** — at least for client connections
+14. **Document consistency model** — what guarantees users actually get
+15. **Active key migration** — reduce miss window during rebalance
+16. **Slow query log** — like Redis `SLOWLOG`
+17. **`MEMORY USAGE <key>`** — per-key memory analysis
