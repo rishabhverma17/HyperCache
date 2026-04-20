@@ -359,6 +359,69 @@ func (nc *NodeCommunicator) MigrateKeys(ctx context.Context, targetNodeID string
 	return nil
 }
 
+// ReplicateToReplicasQuorum replicates a key to replicas and waits for quorum ACKs.
+// quorumSize is the number of successful ACKs required (including the local write).
+// Returns the number of successful ACKs and any error if quorum was not reached.
+func (nc *NodeCommunicator) ReplicateToReplicasQuorum(ctx context.Context, replicas []string, key string, value interface{}, ttlSeconds float64, lamportTS uint64, quorumSize int) (int, error) {
+	// Filter out self
+	var targets []string
+	for _, r := range replicas {
+		if r != nc.localNodeID {
+			targets = append(targets, r)
+		}
+	}
+
+	if len(targets) == 0 {
+		return 1, nil // Only local — quorum of 1
+	}
+
+	type result struct {
+		nodeID string
+		err    error
+	}
+
+	resCh := make(chan result, len(targets))
+	replicationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	for _, nodeID := range targets {
+		go func(nid string) {
+			err := nc.ReplicateEntry(replicationCtx, nid, key, value, ttlSeconds, lamportTS)
+			resCh <- result{nodeID: nid, err: err}
+		}(nodeID)
+	}
+
+	// Count ACKs: 1 for local write already succeeded
+	acks := 1 // local write
+	failures := 0
+	needed := quorumSize - 1 // how many remote ACKs we still need
+
+	for i := 0; i < len(targets); i++ {
+		r := <-resCh
+		if r.err == nil {
+			acks++
+			if acks >= quorumSize {
+				return acks, nil
+			}
+		} else {
+			failures++
+			// If we can't possibly reach quorum, fail early
+			remaining := len(targets) - i - 1
+			if acks+remaining < quorumSize {
+				return acks, fmt.Errorf("quorum unreachable: need %d, have %d, max possible %d", quorumSize, acks, acks+remaining)
+			}
+		}
+	}
+
+	if acks >= quorumSize {
+		return acks, nil
+	}
+
+	_ = needed // suppress unused warning
+	_ = failures
+	return acks, fmt.Errorf("quorum not reached: need %d, got %d ACKs", quorumSize, acks)
+}
+
 // GetMetrics returns communication metrics
 func (nc *NodeCommunicator) GetMetrics() map[string]int64 {
 	nc.metricsMu.RLock()

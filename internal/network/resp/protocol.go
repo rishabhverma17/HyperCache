@@ -65,8 +65,46 @@ func (p *Parser) parseValue() (*Value, error) {
 	case TypeArray:
 		return p.parseArray()
 	default:
+		// Handle inline commands (e.g., "PING\r\n", "CONFIG GET save\r\n")
+		// Inline commands start with a letter (A-Z, a-z). Non-letter bytes
+		// are invalid RESP protocol.
+		if (typeByte >= 'A' && typeByte <= 'Z') || (typeByte >= 'a' && typeByte <= 'z') {
+			if err := p.reader.UnreadByte(); err != nil {
+				return nil, fmt.Errorf("invalid RESP type: %c", typeByte)
+			}
+			return p.parseInline()
+		}
 		return nil, fmt.Errorf("invalid RESP type: %c", typeByte)
 	}
+}
+
+// parseInline parses an inline command (plain text terminated by \r\n or \n)
+func (p *Parser) parseInline() (*Value, error) {
+	line, err := p.reader.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	// Trim trailing \r\n or \n
+	line = strings.TrimRight(line, "\r\n")
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil, fmt.Errorf("empty inline command")
+	}
+	// Split by spaces into tokens
+	parts := strings.Fields(line)
+	elements := make([]Value, len(parts))
+	for i, part := range parts {
+		elements[i] = Value{
+			Type: TypeBulkString,
+			Str:  part,
+			Raw:  []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(part), part)),
+		}
+	}
+	return &Value{
+		Type:  TypeArray,
+		Array: elements,
+		Raw:   []byte(line + "\r\n"),
+	}, nil
 }
 
 // parseSimpleString parses a simple string (+OK\r\n)

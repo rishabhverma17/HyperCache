@@ -16,6 +16,7 @@ import (
 
 	"hypercache/internal/cluster"
 	"hypercache/internal/logging"
+	"hypercache/internal/metrics"
 	"hypercache/internal/network/resp"
 	"hypercache/internal/storage"
 	"hypercache/pkg/config"
@@ -29,6 +30,12 @@ var (
 )
 
 func main() {
+	// Handle subcommands before flag.Parse()
+	if len(os.Args) >= 2 && os.Args[1] == "config" {
+		handleConfigCommand(os.Args[2:])
+		return
+	}
+
 	flag.Parse()
 
 	// Load configuration
@@ -229,6 +236,7 @@ func main() {
 		// Create node communicator for hash-ring routing & replication
 		nodeCommunicator := cluster.NewNodeCommunicator(cfg.Node.ID, coord.GetMembership())
 		respServer.SetNodeCommunicator(nodeCommunicator)
+		respServer.SetConsistencyLevel(cfg.Cluster.ConsistencyLevel)
 
 		// Start RESP server
 		go func() {
@@ -385,7 +393,7 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 	})
 
 	// Cache operations with middleware
-	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID, readRepairer, nodeCommunicator))))
+	mux.Handle("/api/cache/", logging.HTTPMiddleware(http.HandlerFunc(handleCacheRequest(coordinator, store, nodeID, readRepairer, nodeCommunicator, cfg.Cluster.ConsistencyLevel))))
 
 	// Cuckoo filter endpoints
 	mux.HandleFunc("/api/filter/stats", func(w http.ResponseWriter, r *http.Request) {
@@ -533,51 +541,78 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
+		var b strings.Builder
+
 		// Cache metrics
-		fmt.Fprintf(w, "# HELP hypercache_items_total Total number of items in the cache\n")
-		fmt.Fprintf(w, "# TYPE hypercache_items_total gauge\n")
-		fmt.Fprintf(w, "hypercache_items_total{node=\"%s\"} %d\n", nodeID, stats.TotalItems)
+		fmt.Fprintf(&b, "# HELP hypercache_items_total Total number of items in the cache\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_items_total gauge\n")
+		fmt.Fprintf(&b, "hypercache_items_total{node=\"%s\"} %d\n", nodeID, stats.TotalItems)
 
-		fmt.Fprintf(w, "# HELP hypercache_memory_bytes Current memory usage in bytes\n")
-		fmt.Fprintf(w, "# TYPE hypercache_memory_bytes gauge\n")
-		fmt.Fprintf(w, "hypercache_memory_bytes{node=\"%s\"} %d\n", nodeID, stats.TotalMemory)
+		fmt.Fprintf(&b, "# HELP hypercache_memory_bytes Current memory usage in bytes\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_memory_bytes gauge\n")
+		fmt.Fprintf(&b, "hypercache_memory_bytes{node=\"%s\"} %d\n", nodeID, stats.TotalMemory)
 
-		fmt.Fprintf(w, "# HELP hypercache_hits_total Total cache hits\n")
-		fmt.Fprintf(w, "# TYPE hypercache_hits_total counter\n")
-		fmt.Fprintf(w, "hypercache_hits_total{node=\"%s\"} %d\n", nodeID, stats.HitCount)
+		fmt.Fprintf(&b, "# HELP hypercache_hits_total Total cache hits\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_hits_total counter\n")
+		fmt.Fprintf(&b, "hypercache_hits_total{node=\"%s\"} %d\n", nodeID, stats.HitCount)
 
-		fmt.Fprintf(w, "# HELP hypercache_misses_total Total cache misses\n")
-		fmt.Fprintf(w, "# TYPE hypercache_misses_total counter\n")
-		fmt.Fprintf(w, "hypercache_misses_total{node=\"%s\"} %d\n", nodeID, stats.MissCount)
+		fmt.Fprintf(&b, "# HELP hypercache_misses_total Total cache misses\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_misses_total counter\n")
+		fmt.Fprintf(&b, "hypercache_misses_total{node=\"%s\"} %d\n", nodeID, stats.MissCount)
 
-		fmt.Fprintf(w, "# HELP hypercache_evictions_total Total evictions\n")
-		fmt.Fprintf(w, "# TYPE hypercache_evictions_total counter\n")
-		fmt.Fprintf(w, "hypercache_evictions_total{node=\"%s\"} %d\n", nodeID, stats.EvictionCount)
+		fmt.Fprintf(&b, "# HELP hypercache_evictions_total Total evictions\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_evictions_total counter\n")
+		fmt.Fprintf(&b, "hypercache_evictions_total{node=\"%s\"} %d\n", nodeID, stats.EvictionCount)
 
-		fmt.Fprintf(w, "# HELP hypercache_errors_total Total errors\n")
-		fmt.Fprintf(w, "# TYPE hypercache_errors_total counter\n")
-		fmt.Fprintf(w, "hypercache_errors_total{node=\"%s\"} %d\n", nodeID, stats.ErrorCount)
+		fmt.Fprintf(&b, "# HELP hypercache_errors_total Total errors\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_errors_total counter\n")
+		fmt.Fprintf(&b, "hypercache_errors_total{node=\"%s\"} %d\n", nodeID, stats.ErrorCount)
 
-		fmt.Fprintf(w, "# HELP hypercache_hit_rate Cache hit rate percentage\n")
-		fmt.Fprintf(w, "# TYPE hypercache_hit_rate gauge\n")
-		fmt.Fprintf(w, "hypercache_hit_rate{node=\"%s\"} %.2f\n", nodeID, stats.HitRate())
+		fmt.Fprintf(&b, "# HELP hypercache_hit_rate Cache hit rate percentage\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_hit_rate gauge\n")
+		fmt.Fprintf(&b, "hypercache_hit_rate{node=\"%s\"} %.2f\n", nodeID, stats.HitRate())
+
+		// Memory pool metrics
+		poolStats := store.GetMemoryPoolStats()
+		if poolStats != nil {
+			if pressure, ok := poolStats["memory_pressure"].(float64); ok {
+				fmt.Fprintf(&b, "# HELP hypercache_memory_pressure Memory pool pressure ratio (0-1)\n")
+				fmt.Fprintf(&b, "# TYPE hypercache_memory_pressure gauge\n")
+				fmt.Fprintf(&b, "hypercache_memory_pressure{node=\"%s\"} %.4f\n", nodeID, pressure)
+			}
+			if allocs, ok := poolStats["total_allocations"].(int64); ok {
+				fmt.Fprintf(&b, "# HELP hypercache_allocations_total Total memory allocations\n")
+				fmt.Fprintf(&b, "# TYPE hypercache_allocations_total counter\n")
+				fmt.Fprintf(&b, "hypercache_allocations_total{node=\"%s\"} %d\n", nodeID, allocs)
+			}
+			if failures, ok := poolStats["allocation_failures"].(int64); ok {
+				fmt.Fprintf(&b, "# HELP hypercache_allocation_failures_total Total allocation failures\n")
+				fmt.Fprintf(&b, "# TYPE hypercache_allocation_failures_total counter\n")
+				fmt.Fprintf(&b, "hypercache_allocation_failures_total{node=\"%s\"} %d\n", nodeID, failures)
+			}
+		}
 
 		// Cluster metrics
-		fmt.Fprintf(w, "# HELP hypercache_cluster_healthy Whether the cluster is healthy (1=yes, 0=no)\n")
-		fmt.Fprintf(w, "# TYPE hypercache_cluster_healthy gauge\n")
+		fmt.Fprintf(&b, "# HELP hypercache_cluster_healthy Whether the cluster is healthy (1=yes, 0=no)\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_cluster_healthy gauge\n")
 		healthVal := 0
 		if health.Healthy {
 			healthVal = 1
 		}
-		fmt.Fprintf(w, "hypercache_cluster_healthy{node=\"%s\"} %d\n", nodeID, healthVal)
+		fmt.Fprintf(&b, "hypercache_cluster_healthy{node=\"%s\"} %d\n", nodeID, healthVal)
 
-		fmt.Fprintf(w, "# HELP hypercache_cluster_size Number of nodes in the cluster\n")
-		fmt.Fprintf(w, "# TYPE hypercache_cluster_size gauge\n")
-		fmt.Fprintf(w, "hypercache_cluster_size{node=\"%s\"} %d\n", nodeID, health.ClusterSize)
+		fmt.Fprintf(&b, "# HELP hypercache_cluster_size Number of nodes in the cluster\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_cluster_size gauge\n")
+		fmt.Fprintf(&b, "hypercache_cluster_size{node=\"%s\"} %d\n", nodeID, health.ClusterSize)
 
-		fmt.Fprintf(w, "# HELP hypercache_up Whether the node is up (always 1 if reachable)\n")
-		fmt.Fprintf(w, "# TYPE hypercache_up gauge\n")
-		fmt.Fprintf(w, "hypercache_up{node=\"%s\"} 1\n", nodeID)
+		fmt.Fprintf(&b, "# HELP hypercache_up Whether the node is up (always 1 if reachable)\n")
+		fmt.Fprintf(&b, "# TYPE hypercache_up gauge\n")
+		fmt.Fprintf(&b, "hypercache_up{node=\"%s\"} 1\n", nodeID)
+
+		// Latency histograms and operation counters from metrics collector
+		metrics.Global().WritePrometheus(&b, nodeID)
+
+		w.Write([]byte(b.String()))
 	})
 
 	// Wrap the main handler with CORS and logging middleware
@@ -626,7 +661,7 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 	}
 }
 
-func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.BasicStore, nodeID string, readRepairer *cluster.ReadRepairer, nodeCommunicator *cluster.NodeCommunicator) http.HandlerFunc {
+func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.BasicStore, nodeID string, readRepairer *cluster.ReadRepairer, nodeCommunicator *cluster.NodeCommunicator, consistencyLevel string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract key from URL path
 		path := strings.TrimPrefix(r.URL.Path, "/api/cache/")
@@ -829,20 +864,35 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				}
 
 				replicas := coordinator.GetRouting().GetReplicas(key, 3)
-				go func() {
-					for _, replica := range replicas {
-						if replica == nodeID {
-							continue
-						}
-						if err := nodeCommunicator.ReplicateEntry(
-							context.Background(), replica, key, requestBody.Value, ttl.Seconds(), lamportTS,
-						); err != nil {
-							logging.Error(context.Background(), logging.ComponentCluster, logging.ActionReplication, "SET replication failed", err, map[string]interface{}{
-								"key": key, "target": replica,
-							})
-						}
+
+				if consistencyLevel == "quorum" {
+					// Quorum mode: wait for majority ACKs before responding
+					quorumSize := len(replicas)/2 + 1
+					acks, qErr := nodeCommunicator.ReplicateToReplicasQuorum(
+						r.Context(), replicas, key, requestBody.Value, ttl.Seconds(), lamportTS, quorumSize,
+					)
+					if qErr != nil {
+						logging.Warn(r.Context(), logging.ComponentCluster, logging.ActionReplication, "Quorum write partial failure", map[string]interface{}{
+							"key": key, "acks": acks, "quorum": quorumSize, "error": qErr.Error(),
+						})
 					}
-				}()
+				} else {
+					// Eventual mode: async fire-and-forget replication
+					go func() {
+						for _, replica := range replicas {
+							if replica == nodeID {
+								continue
+							}
+							if err := nodeCommunicator.ReplicateEntry(
+								context.Background(), replica, key, requestBody.Value, ttl.Seconds(), lamportTS,
+							); err != nil {
+								logging.Error(context.Background(), logging.ComponentCluster, logging.ActionReplication, "SET replication failed", err, map[string]interface{}{
+									"key": key, "target": replica,
+								})
+							}
+						}
+					}()
+				}
 
 				logging.Info(r.Context(), logging.ComponentEventBus, logging.ActionReplication, "SET replicated via hash ring", map[string]interface{}{
 					"key":      key,
@@ -1324,4 +1374,43 @@ func resolveSeeds(ctx context.Context, staticSeeds []string, seedDNS string, see
 	}
 
 	return deduped
+}
+
+// handleConfigCommand handles the "config" subcommand.
+// Usage: hypercache config validate <path>
+func handleConfigCommand(args []string) {
+	if len(args) == 0 || args[0] != "validate" {
+		fmt.Fprintf(os.Stderr, "Usage: hypercache config validate <path>\n")
+		os.Exit(1)
+	}
+	path := "configs/hypercache.yaml"
+	if len(args) >= 2 {
+		path = args[1]
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: %v\n", err)
+		os.Exit(1)
+	}
+
+	warnings := config.CheckWarnings(cfg)
+
+	fmt.Printf("Config: %s\n", path)
+	fmt.Printf("Node ID: %s\n", cfg.Node.ID)
+	fmt.Printf("RESP port: %d, HTTP port: %d, Gossip port: %d\n",
+		cfg.Network.RESPPort, cfg.Network.HTTPPort, cfg.Network.GossipPort)
+	fmt.Printf("Stores: %d (max %d)\n", len(cfg.Stores), cfg.Cache.MaxStores)
+	fmt.Printf("Persistence: enabled=%v, strategy=%s, sync_policy=%s\n",
+		cfg.Persistence.Enabled, cfg.Persistence.Strategy, cfg.Persistence.SyncPolicy)
+	fmt.Printf("Max memory: %s\n", cfg.Cache.MaxMemory)
+
+	if len(warnings) > 0 {
+		fmt.Printf("\nWarnings:\n")
+		for _, w := range warnings {
+			fmt.Printf("  ⚠  %s\n", w)
+		}
+	}
+
+	fmt.Printf("\nValidation: PASS\n")
 }

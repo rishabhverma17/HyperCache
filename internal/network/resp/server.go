@@ -28,6 +28,9 @@ type Server struct {
 	// Node communicator for hash-ring proxy/replication
 	nodeCommunicator *cluster.NodeCommunicator
 
+	// Consistency level: "eventual" (default, async replication) or "quorum" (wait for majority ACKs)
+	consistencyLevel string
+
 	// Connection management
 	connections map[net.Conn]*ClientConn
 	connMutex   sync.RWMutex
@@ -116,6 +119,11 @@ func (s *Server) SetStoreManager(sm *storage.StoreManager) {
 // SetNodeCommunicator sets the node communicator for hash-ring proxying.
 func (s *Server) SetNodeCommunicator(nc *cluster.NodeCommunicator) {
 	s.nodeCommunicator = nc
+}
+
+// SetConsistencyLevel sets the write consistency level ("eventual" or "quorum").
+func (s *Server) SetConsistencyLevel(level string) {
+	s.consistencyLevel = level
 }
 
 // NewServerWithConfig creates a new RESP server with custom configuration
@@ -519,7 +527,7 @@ func (s *Server) handleSet(clientConn *ClientConn, cmd Command) ([]byte, error) 
 			return nil, fmt.Errorf("failed to set key locally: %w", err)
 		}
 
-		// Replicate to hash-ring replicas (async, fire-and-forget)
+		// Replicate to hash-ring replicas
 		if s.nodeCommunicator != nil {
 			lamportTS := uint64(0)
 			if s.coord.GetClock() != nil {
@@ -527,16 +535,29 @@ func (s *Server) handleSet(clientConn *ClientConn, cmd Command) ([]byte, error) 
 			}
 
 			replicas := routing.GetReplicas(key, 3) // replication factor
-			go func() {
-				for _, replica := range replicas {
-					if replica == s.coord.GetLocalNodeID() {
-						continue
-					}
-					_ = s.nodeCommunicator.ReplicateEntry(
-						context.Background(), replica, key, string(value), ttl.Seconds(), lamportTS,
-					)
+
+			if s.consistencyLevel == "quorum" {
+				// Quorum mode: wait for majority ACKs before returning OK
+				quorumSize := len(replicas)/2 + 1
+				acks, err := s.nodeCommunicator.ReplicateToReplicasQuorum(
+					context.Background(), replicas, key, string(value), ttl.Seconds(), lamportTS, quorumSize,
+				)
+				if err != nil {
+					return nil, fmt.Errorf("quorum write failed: %d/%d ACKs: %w", acks, quorumSize, err)
 				}
-			}()
+			} else {
+				// Eventual mode: async fire-and-forget replication
+				go func() {
+					for _, replica := range replicas {
+						if replica == s.coord.GetLocalNodeID() {
+							continue
+						}
+						_ = s.nodeCommunicator.ReplicateEntry(
+							context.Background(), replica, key, string(value), ttl.Seconds(), lamportTS,
+						)
+					}
+				}()
+			}
 		}
 
 		return formatter.FormatSimpleString("OK"), nil
@@ -724,20 +745,32 @@ func (s *Server) handleStats(cmd Command) ([]byte, error) {
 	return formatter.FormatArray(result), nil
 }
 
-// handleConfig returns empty results for CONFIG GET (redis-benchmark compatibility).
+// handleConfig returns Redis-compatible results for CONFIG commands.
+// CONFIG GET <param> returns a key-value array (even if empty values).
+// This ensures redis-benchmark connection reuse works correctly.
 func (s *Server) handleConfig(cmd Command) ([]byte, error) {
 	formatter := NewFormatter()
-	// CONFIG GET <param> → return empty array (no matching config)
-	// CONFIG SET/RESETSTAT/REWRITE → return OK
-	if len(cmd.Args) > 0 && strings.ToUpper(cmd.Args[0]) == "GET" {
-		return formatter.FormatArray(nil), nil
+	if len(cmd.Args) >= 2 && strings.ToUpper(cmd.Args[0]) == "GET" {
+		// Return key-value pairs like Redis: [param, value, param, value, ...]
+		// For unknown params, return the param with an empty value.
+		var result [][]byte
+		for _, param := range cmd.Args[1:] {
+			result = append(result, formatter.FormatBulkString(param))
+			result = append(result, formatter.FormatBulkString(""))
+		}
+		return formatter.FormatArray(result), nil
 	}
 	return formatter.FormatSimpleString("OK"), nil
 }
 
-// handleCommand returns empty results for COMMAND (redis-benchmark compatibility).
+// handleCommand returns Redis-compatible results for COMMAND commands.
 func (s *Server) handleCommand(cmd Command) ([]byte, error) {
 	formatter := NewFormatter()
+	if len(cmd.Args) > 0 && strings.ToUpper(cmd.Args[0]) == "DOCS" {
+		// COMMAND DOCS: return empty map-like array (no docs available)
+		return formatter.FormatArray(nil), nil
+	}
+	// COMMAND with no args: return empty array (command list)
 	return formatter.FormatArray(nil), nil
 }
 

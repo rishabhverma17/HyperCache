@@ -149,6 +149,9 @@ func (he *HybridEngine) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 
+	// Clean up orphaned .tmp files from interrupted snapshots
+	he.snapshotManager.CleanupTempFiles()
+
 	// Initialize AOF if enabled
 	if he.config.EnableAOF {
 		if err := he.aofManager.Open(); err != nil {

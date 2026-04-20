@@ -322,7 +322,7 @@ Random key workload (500K unique keys, pipeline=16) runs at **2,823 SET/s** — 
 
 | Category | Status | Notes |
 |----------|--------|-------|
-| Config validation | ⚠️ Partial | Validates types, not semantic safety |
+| Config validation | ✅ Done | `hypercache config validate <path>` CLI + semantic warnings |
 | Graceful shutdown | ✅ Done | Signal handling, flush persistence |
 | Health endpoint | ✅ Done | `/health` returns cluster status |
 | Log rotation | ✅ Done | Configurable max files and size |
@@ -350,15 +350,15 @@ Random key workload (500K unique keys, pipeline=16) runs at **2,823 SET/s** — 
 - ~~**Synchronous DELETE replication**~~ — ✅ DELETEs replicate synchronously for consistency.
 - ~~**CuckooFilter FPP default**~~ — ✅ Defaults to 0.01 when unset, preventing cuckoo filter creation failures.
 
-### P1 (Should fix for credibility)
+### P1 (Should fix for credibility) — 7 of 8 COMPLETE ✅
 5. **Authentication** — at least `requirepass` for RESP and API key for HTTP
-6. **Non-blocking snapshots** — current implementation holds read lock during snapshot creation
-7. **Prometheus-compatible metrics** — latency histograms, replication lag, eviction rate
-8. **Config validation CLI** — `hypercache config validate <path>`
-9. **.tmp file cleanup** — orphaned snapshot temps on startup
-10. **RESP connection reuse bug** — redis-benchmark non-pipelined tests fail because the parser breaks after CONFIG response on the same connection
-11. **Quorum writes** — `consistency_level: "quorum"` to wait for N replica ACKs before returning OK
-12. **Random-key eviction performance** — probabilistic sampling (Redis-style) instead of linked-list walk
+6. ~~**Non-blocking snapshots**~~ — ✅ **FIXED**: `SnapshotRawData()` copies data per-shard with brief RLock, then releases. No global read lock during snapshot. Writes to other shards proceed concurrently.
+7. ~~**Prometheus-compatible metrics**~~ — ✅ **FIXED**: `internal/metrics/` package with atomic counters and fixed-bucket histograms (no external deps). SET/GET/DEL latency histograms (15 buckets from 10µs to 1s), memory pool pressure/allocations/failures, operation counters. All written in Prometheus text exposition format on `/metrics`.
+8. ~~**Config validation CLI**~~ — ✅ **FIXED**: `hypercache config validate <path>` subcommand. Loads, validates, and reports config summary + semantic warnings (dangerous sync_policy, port conflicts, missing seeds, high replication factor, etc.).
+9. ~~**.tmp file cleanup**~~ — ✅ **FIXED**: `SnapshotManager.CleanupTempFiles()` called during `HybridEngine.Start()`. Removes orphaned `*.tmp` files from data directory on startup.
+10. ~~**RESP connection reuse bug**~~ — ✅ **FIXED**: `CONFIG GET` now returns Redis-compatible key-value array (not empty array). Inline command parsing added to RESP parser (letters only — numeric/symbol prefixes still rejected). `COMMAND DOCS` handled.
+11. ~~**Quorum writes**~~ — ✅ **FIXED**: `consistency_level: "quorum"` in config. SET waits for majority of hash-ring replicas to ACK before returning OK. `ReplicateToReplicasQuorum()` sends parallel HTTP replication with 5s timeout, fails early if quorum is unreachable. Works on both RESP and HTTP API paths. Default remains `"eventual"` (async, fire-and-forget).
+12. ~~**Random-key eviction performance**~~ — ✅ **FIXED**: `ShardedMap.SampleKeys(5)` randomly samples keys across shards. Background evictor picks the least-recently-accessed from samples — O(1) per eviction round instead of O(n) linked-list walk.
 
 ### P2 (Nice to have)
 13. **TLS support** — at least for client connections

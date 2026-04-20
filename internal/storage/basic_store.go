@@ -14,6 +14,7 @@ import (
 	"hypercache/internal/cache"
 	"hypercache/internal/filter"
 	"hypercache/internal/logging"
+	"hypercache/internal/metrics"
 	"hypercache/internal/persistence"
 )
 
@@ -335,6 +336,9 @@ func (s *BasicStore) GetTimestamp(key string) uint64 {
 
 // setWithContextInternal is the internal implementation that accepts an optional context
 func (s *BasicStore) setWithContextInternal(ctx context.Context, key string, value interface{}, sessionID string, ttl time.Duration, lamportTS uint64) error {
+	start := time.Now()
+	defer metrics.Global().RecordOp("set", start)
+
 	if key == "" {
 		s.incrementErrorCount()
 		return fmt.Errorf("key cannot be empty")
@@ -463,6 +467,9 @@ func (s *BasicStore) Get(key string) (interface{}, error) {
 // and avoids the string(data) allocation that Get() performs.
 // The RESP handler should use this instead of Get() for maximum throughput.
 func (s *BasicStore) GetRawBytes(key string) ([]byte, string, error) {
+	start := time.Now()
+	defer metrics.Global().RecordOp("get", start)
+
 	if key == "" {
 		return nil, "", fmt.Errorf("key cannot be empty")
 	}
@@ -553,6 +560,9 @@ func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, 
 
 // Delete removes an item from the cache
 func (s *BasicStore) Delete(key string) error {
+	start := time.Now()
+	defer metrics.Global().RecordOp("del", start)
+
 	if key == "" {
 		s.incrementErrorCount()
 		return fmt.Errorf("key cannot be empty")
@@ -634,15 +644,28 @@ func (s *BasicStore) backgroundEvictor() {
 					break
 				}
 
-				// Evict via eviction policy
+				// Probabilistic eviction sampling (Redis-style):
+				// Sample 5 random keys and evict the least-recently-accessed one.
+				// This is O(1) per round instead of O(n) linked-list walk.
 				evicted := uint64(0)
-				for i := 0; i < 20; i++ {
-					candidate := s.evictPolicy.NextEvictionCandidate()
-					if candidate == nil {
-						break
+				samples := s.data.SampleKeys(5)
+				if len(samples) == 0 {
+					break
+				}
+				var bestKey string
+				var bestTime time.Time
+				for _, key := range samples {
+					item, ok := s.data.Get(key)
+					if !ok {
+						continue
 					}
-					key := string(candidate.Key)
-					_ = s.Delete(key)
+					if bestKey == "" || item.LastAccessed.Before(bestTime) {
+						bestKey = key
+						bestTime = item.LastAccessed
+					}
+				}
+				if bestKey != "" {
+					_ = s.Delete(bestKey)
 					evicted++
 				}
 				if evicted == 0 && len(expired) == 0 {
@@ -710,6 +733,14 @@ func (s *BasicStore) Stats() BasicStoreStats {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 	return s.stats
+}
+
+// GetMemoryPoolStats returns memory pool statistics for metrics.
+func (s *BasicStore) GetMemoryPoolStats() map[string]interface{} {
+	if s.memPool == nil {
+		return nil
+	}
+	return s.memPool.GetStats()
 }
 
 // FilterStats returns filter statistics if filter is enabled

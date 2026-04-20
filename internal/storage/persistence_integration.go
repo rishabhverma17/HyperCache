@@ -34,16 +34,13 @@ func (s *BasicStore) StartPersistence(ctx context.Context) error {
 }
 
 // getSnapshotData returns current cache data for snapshot/compaction use.
+// Uses per-shard RLock (non-blocking) and copies raw bytes to avoid deserialization overhead.
 func (s *BasicStore) getSnapshotData() map[string]interface{} {
-	data := make(map[string]interface{})
-	s.data.RangeAll(func(key string, item *CacheItem) bool {
-		value, err := item.GetValue()
-		if err != nil {
-			return true // continue
-		}
-		data[key] = value
-		return true
-	})
+	items := s.data.SnapshotRawData()
+	data := make(map[string]interface{}, len(items))
+	for _, item := range items {
+		data[item.Key] = string(item.RawBytes)
+	}
 	return data
 }
 

@@ -296,6 +296,23 @@ func (sm *SnapshotManager) findLatestSnapshot() (string, error) {
 	return latest, nil
 }
 
+// CleanupTempFiles removes orphaned .tmp files left by interrupted snapshot writes.
+// Called on startup to prevent stale temp files from accumulating.
+func (sm *SnapshotManager) CleanupTempFiles() {
+	pattern := filepath.Join(sm.dataDir, "*.tmp")
+	tmpFiles, err := filepath.Glob(pattern)
+	if err != nil {
+		return
+	}
+	for _, f := range tmpFiles {
+		if err := os.Remove(f); err != nil {
+			logging.Warn(nil, logging.ComponentPersistence, logging.ActionCleanup, "Failed to remove temp file", map[string]interface{}{"path": f, "error": err.Error()})
+		} else {
+			logging.Info(nil, logging.ComponentPersistence, logging.ActionCleanup, "Removed orphaned temp file", map[string]interface{}{"path": f})
+		}
+	}
+}
+
 func (sm *SnapshotManager) cleanupOldSnapshots() error {
 	if sm.config.RetainLogs <= 0 {
 		return nil // No cleanup needed

@@ -22,21 +22,25 @@
 
 **Production-ready distributed cache with full observability stack:**
 - ✅ Multi-node cluster deployment with hash-ring partitioned routing
-- ✅ Full Redis client compatibility (RESP protocol)
+- ✅ Full Redis client compatibility (RESP protocol + inline commands)
 - ✅ Lamport timestamps for causal ordering of distributed writes
+- ✅ Quorum writes — `consistency_level: "quorum"` waits for majority ACKs
 - ✅ Read-repair for replication propagation window
 - ✅ Sharded locks (32 independent shards) for high-concurrency writes
+- ✅ Non-blocking snapshots — per-shard copy, no global read lock
 - ✅ Enterprise persistence (AOF + Snapshots) with background writes
+- ✅ Probabilistic eviction sampling (Redis-style random-key selection)
+- ✅ Prometheus metrics with latency histograms (p50/p95/p99)
+- ✅ Config validation CLI — `hypercache config validate <path>`
 - ✅ Structured JSON logging with correlation ID tracing
-- ✅ Real-time monitoring with Grafana + Elasticsearch
 - ✅ HTTP API + RESP protocol support
 - ✅ Advanced memory management with pressure detection
 - ✅ Cuckoo filter integration for negative lookup acceleration
 
 ### 🔥 **Monitoring & Observability**
-- **Grafana Dashboards**: Real-time metrics visualization
-- **Elasticsearch**: Centralized log aggregation and search
-- **Filebeat**: Log shipping and processing
+- **Prometheus Metrics**: Latency histograms, memory pressure, operation counters on `/metrics`
+- **Grafana Dashboards**: Pre-built Prometheus dashboard (throughput, latency p50/p95/p99, memory, cluster)
+- **Elasticsearch + Filebeat**: Centralized log aggregation and search
 - **Health Checks**: Built-in monitoring endpoints
 
 ## 🚀 **Quick Start**
@@ -310,11 +314,13 @@ make deps               Download and tidy dependencies
 
 ### **Distributed Resilience**
 - **Hash-Ring Routing**: Consistent hashing with 256 virtual nodes routes each key to its primary owner. Non-owner nodes transparently proxy requests to the correct node
+- **Quorum Writes**: `consistency_level: "quorum"` waits for majority of hash-ring replicas to ACK before returning OK. Parallel replication with 5s timeout and early-fail if quorum is unreachable. Default is `"eventual"` (async fire-and-forget)
 - **Targeted Replication**: Writes replicate to N hash-ring replicas (default 3) via direct HTTP — not gossip broadcast to all nodes
 - **Lamport Timestamps**: Logical clocks for causal ordering of distributed operations. Stale writes from out-of-order replication are automatically rejected
 - **Read-Repair**: On local cache miss, hash-ring replicas are queried before returning 404. Bridges the replication propagation window
 - **Sharded Concurrency**: 32 independent lock shards eliminate the global mutex bottleneck. Each key locks only its shard
-- **Background Eviction**: Memory pressure triggers a background evictor goroutine — eviction never blocks the write path
+- **Probabilistic Eviction**: Redis-style random sampling (5 keys per round, evict least-recently-accessed) — O(1) per eviction instead of O(n) linked-list walk
+- **Non-Blocking Snapshots**: `SnapshotRawData()` copies data per-shard with brief RLock, then releases. Writes to other shards proceed concurrently during snapshot
 - **Correlation ID Tracing**: Every request gets a unique ID that flows across all nodes for end-to-end debugging
 
 ### **Enterprise Persistence & Recovery**
@@ -362,10 +368,11 @@ make deps               Download and tidy dependencies
 
 ### **Production Monitoring**
 - **Structured JSON Logging**: Every log line has timestamp, level, component, action, correlation ID
-- **Grafana Dashboards**: Health overview, performance metrics, system components
+- **Prometheus Metrics**: `/metrics` endpoint with latency histograms (SET/GET/DEL p50/p95/p99), memory pressure, allocation rates, operation counters — all in Prometheus text exposition format
+- **Grafana Dashboards**: 4 pre-built dashboards — Health, Performance, System Components (Elasticsearch), and Prometheus Metrics (16 panels: throughput, latency percentiles, memory pressure, cluster health)
 - **Elasticsearch + Filebeat**: Centralized log aggregation with container-scoped filtering
 - **Configurable Log Levels**: debug/info/warn/error/fatal — tunable per node at runtime
-- **Prometheus Metrics**: `/metrics` endpoint with cache stats, cluster health, hit rates
+- **Config Validation CLI**: `hypercache config validate <path>` — validates config and warns about dangerous settings (sync_policy, port conflicts, missing seeds)
 
 ## � **Project Structure**
 
@@ -394,8 +401,10 @@ HyperCache/
 ├── docs/                       # Technical documentation
 ├── logs/                       # Application logs (Filebeat source)
 ├── data/                       # Persistence data (node storage)
-├── docker-compose.logging.yml  # Monitoring stack
-└── filebeat.yml               # Log shipping configuration
+├── docker-compose.logging.yml     # ELK logging stack
+├── docker-compose.monitoring.yml  # Prometheus + Grafana metrics stack
+├── prometheus.yml                 # Prometheus scrape config
+└── filebeat.yml                   # Log shipping configuration
 ```
 
 ## 🔧 **Architecture Overview**
@@ -426,11 +435,26 @@ HyperCache/
 
 ## � **Monitoring & Operations**
 
-### **Grafana Dashboards** (http://localhost:3000)
+### **Grafana Dashboards**
+
+**ELK Dashboards** (http://localhost:3000 — via `docker-compose.logging.yml`):
 - **System Overview**: Cluster health, node status, memory usage
 - **Performance Metrics**: Request rates, response times, cache hit ratios
 - **Error Monitoring**: Failed requests, timeout alerts, node failures
-- **Capacity Planning**: Memory trends, storage usage, growth patterns
+
+**Prometheus Dashboard** (http://localhost:3001 — via `docker-compose.monitoring.yml`):
+- **Overview Row**: Cluster health, size, items, memory, pressure, hit rate
+- **Throughput Row**: SET/GET/DEL ops/sec, hits & misses/sec
+- **Latency Row**: SET/GET/DEL p50, p95, p99 histograms
+- **Memory Row**: Usage over time, pressure with threshold bands, allocations/sec, errors & evictions/sec
+- **Cluster Row**: Cluster size over time, items per node
+
+```bash
+# Start Prometheus + Grafana monitoring stack
+docker compose -f docker-compose.monitoring.yml up -d
+# Grafana: http://localhost:3001 (admin / admin123)
+# Prometheus: http://localhost:9090
+```
 
 ### **Elasticsearch Logs** (http://localhost:9200)
 - **Centralized Logging**: All cluster nodes, operations, and errors
@@ -588,6 +612,7 @@ cluster:
   seed_dns: ""                       # DNS-based discovery (K8s headless Service)
   seed_dns_port: 7946                # Port for DNS-discovered seeds
   replication_factor: 3
+  consistency_level: "eventual"  # "eventual" (async) or "quorum" (wait for majority ACKs)
   
 cache:
   max_memory: "8GB"
@@ -663,13 +688,33 @@ stores:
 
 ### Monitoring Configuration
 ```yaml
-# Grafana (localhost:3000)
+# Grafana — ELK stack (localhost:3000)
 Username: admin
 Password: admin123
+Datasource: Elasticsearch (HyperCache Logs)
 
-# Pre-configured datasources:
-- Elasticsearch (HyperCache Logs)
-- Health check endpoints
+# Grafana — Prometheus stack (localhost:3001)
+Username: admin
+Password: admin123
+Datasource: Prometheus (auto-provisioned)
+Dashboard: "HyperCache — Prometheus Metrics" (auto-loaded)
+```
+
+### Config Validation
+```bash
+# Validate a config file before deploying
+hypercache config validate configs/hypercache.yaml
+
+# Output:
+# Config: configs/hypercache.yaml
+# Node ID: node-1
+# RESP port: 8080, HTTP port: 9080, Gossip port: 7946
+# Stores: 1 (max 16)
+# Persistence: enabled=true, strategy=hybrid, sync_policy=everysec
+# Warnings:
+#   ⚠  compression_level=6: high CPU cost for snapshots; consider level 1
+#   ⚠  no cluster seeds or seed_dns configured — node will run standalone
+# Validation: PASS
 ```
 
 ## 🛠️ **Core Technologies**

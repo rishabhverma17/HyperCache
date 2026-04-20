@@ -1,0 +1,57 @@
+# Prometheus + Grafana monitoring stack for HyperCache metrics.
+#
+# Usage:
+#   docker compose -f docker-compose.monitoring.yml up -d
+#
+# Then open:
+#   Grafana:    http://localhost:3001  (admin / admin123)
+#   Prometheus: http://localhost:9090
+#
+# The pre-provisioned dashboard "HyperCache — Prometheus Metrics" is
+# auto-loaded and uses the Prometheus datasource. Select your node(s)
+# from the dropdown at the top.
+#
+# Prerequisites: HyperCache node(s) must be running and exposing
+# the /metrics endpoint (HTTP port, default 9080).
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: hypercache-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: hypercache-grafana-prom
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_prom_data:/var/lib/grafana
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_prom_data:
+    driver: local
+
+networks:
+  monitoring:
+    driver: bridge

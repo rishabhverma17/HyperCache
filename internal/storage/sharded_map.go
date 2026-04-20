@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"math/rand/v2"
 	"sync"
 
 	"github.com/cespare/xxhash/v2"
@@ -198,4 +199,65 @@ func (sm *ShardedMap) GetAllocatedPtr(key string) ([]byte, bool) {
 	ptr, ok := s.allocatedPtrs[key]
 	s.mu.RUnlock()
 	return ptr, ok
+}
+
+// SampleKeys returns up to n random keys from across all shards.
+// Uses random sampling (Redis-style) for O(n) eviction candidate selection.
+func (sm *ShardedMap) SampleKeys(n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	result := make([]string, 0, n)
+	startShard := rand.IntN(numShards)
+	for attempt := 0; attempt < numShards && len(result) < n; attempt++ {
+		idx := (startShard + attempt) % numShards
+		s := &sm.shards[idx]
+		s.mu.RLock()
+		need := n - len(result)
+		collected := 0
+		for k := range s.items {
+			result = append(result, k)
+			collected++
+			if collected >= need {
+				break
+			}
+		}
+		s.mu.RUnlock()
+	}
+	return result
+}
+
+// SnapshotItem holds a point-in-time copy of a single cached entry's raw data.
+type SnapshotItem struct {
+	Key       string
+	RawBytes  []byte
+	ValueType string
+	Size      uint64
+}
+
+// SnapshotRawData returns a copy of all keys with their raw bytes and value types.
+// Each shard is briefly RLocked then released, so writes to other shards proceed concurrently.
+func (sm *ShardedMap) SnapshotRawData() []SnapshotItem {
+	total := 0
+	for i := range sm.shards {
+		sm.shards[i].mu.RLock()
+		total += len(sm.shards[i].items)
+		sm.shards[i].mu.RUnlock()
+	}
+	result := make([]SnapshotItem, 0, total)
+	for i := range sm.shards {
+		sm.shards[i].mu.RLock()
+		for _, item := range sm.shards[i].items {
+			raw := make([]byte, len(item.ValuePtr))
+			copy(raw, item.ValuePtr)
+			result = append(result, SnapshotItem{
+				Key:       item.Key,
+				RawBytes:  raw,
+				ValueType: item.ValueType,
+				Size:      item.Size,
+			})
+		}
+		sm.shards[i].mu.RUnlock()
+	}
+	return result
 }

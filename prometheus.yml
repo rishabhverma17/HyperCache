@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'hypercache'
+    scrape_interval: 5s
+    static_configs:
+      # Single-node development
+      - targets: ['host.docker.internal:9080']
+        labels:
+          cluster: 'hypercache-dev'
+
+      # 3-node cluster (uncomment for cluster mode)
+      # - targets:
+      #     - 'hypercache-node-1:9080'
+      #     - 'hypercache-node-2:9081'
+      #     - 'hypercache-node-3:9082'
+      #   labels:
+      #     cluster: 'hypercache-cluster'
+    metrics_path: '/metrics'

@@ -405,3 +405,38 @@ func (c *Config) ToClusterConfig() interface{} {
 		HeartbeatInterval: 5,
 	}
 }
+
+// CheckWarnings returns non-fatal warnings about potentially dangerous configuration.
+func CheckWarnings(c *Config) []string {
+	var warnings []string
+
+	if c.Persistence.Enabled && c.Persistence.SyncPolicy == "no" {
+		warnings = append(warnings, "sync_policy='no': up to ~30s of writes may be lost on crash")
+	}
+
+	if !c.Persistence.Enabled {
+		warnings = append(warnings, "persistence disabled: all data is lost on restart")
+	}
+
+	if c.Persistence.CompressionLevel >= 6 {
+		warnings = append(warnings, fmt.Sprintf("compression_level=%d: high CPU cost for snapshots; consider level 1 for speed", c.Persistence.CompressionLevel))
+	}
+
+	if c.Network.RESPPort == c.Network.HTTPPort {
+		warnings = append(warnings, "resp_port and http_port are the same — they must differ")
+	}
+
+	if c.Network.GossipPort == c.Network.RESPPort || c.Network.GossipPort == c.Network.HTTPPort {
+		warnings = append(warnings, "gossip_port conflicts with resp_port or http_port")
+	}
+
+	if len(c.Cluster.Seeds) == 0 && c.Cluster.SeedDNS == "" {
+		warnings = append(warnings, "no cluster seeds or seed_dns configured — node will run standalone")
+	}
+
+	if c.Cluster.ReplicationFactor > 5 {
+		warnings = append(warnings, fmt.Sprintf("replication_factor=%d: high replication factor increases write latency", c.Cluster.ReplicationFactor))
+	}
+
+	return warnings
+}
