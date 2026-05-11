@@ -381,8 +381,10 @@ func startHTTPServer(ctx context.Context, coordinator cluster.CoordinatorService
 		}
 
 		if payload.Value == nil {
-			// This is a DELETE replication
-			_ = store.Delete(payload.Key)
+			// This is a DELETE replication — record a tombstone tagged with the
+			// originator's Lamport timestamp so any later-arriving stale SET
+			// replication for the same key is rejected by SetWithTimestamp.
+			_ = store.DeleteWithTimestamp(payload.Key, payload.LamportTS)
 		} else {
 			ttl := time.Duration(payload.TTL) * time.Second
 			_, _ = store.SetWithTimestamp(r.Context(), payload.Key, payload.Value, "replication", ttl, payload.LamportTS)
@@ -922,9 +924,19 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 				"node_id": nodeID,
 			})
 
+			// Allocate a Lamport timestamp up-front so that the local tombstone,
+			// the AOF record, and the replication payload all share the same TS.
+			// Allocating before the local Delete is critical: it ensures the
+			// tombstone written here is tagged with the same TS that suppresses
+			// any stale in-flight SET replication arriving from peers.
+			lamportTS := uint64(0)
+			if coordinator != nil && coordinator.GetClock() != nil {
+				lamportTS = coordinator.GetClock().Tick()
+			}
+
 			// Delete operation
 			timer := logging.StartTimer(r.Context(), logging.ComponentCache, "delete_operation", "Cache DELETE operation")
-			err := store.Delete(key)
+			err := store.DeleteWithTimestamp(key, lamportTS)
 			timer()
 
 			existed := err == nil
@@ -942,11 +954,6 @@ func handleCacheRequest(coordinator cluster.CoordinatorService, store *storage.B
 			// DELETEs are replicated synchronously to ensure consistency before responding.
 			// Always replicate deletes (even if key wasn't found locally, it may exist on replicas)
 			if coordinator != nil && nodeCommunicator != nil && coordinator.GetRouting() != nil {
-				lamportTS := uint64(0)
-				if coordinator.GetClock() != nil {
-					lamportTS = coordinator.GetClock().Tick()
-				}
-
 				replicas := coordinator.GetRouting().GetReplicas(key, 3)
 				for _, replica := range replicas {
 					if replica == nodeID {

@@ -13,8 +13,11 @@ const numShards = 32
 type shard struct {
 	items         map[string]*CacheItem
 	allocatedPtrs map[string][]byte
-	tombstones    map[string]struct{} // lightweight tombstone set (expiry managed externally)
-	mu            sync.RWMutex
+	// tombstones records recently-deleted keys with the Lamport timestamp of the
+	// delete. The timestamp is consulted by SetWithTimestamp to reject stale
+	// in-flight writes that would otherwise resurrect a deleted key.
+	tombstones map[string]uint64
+	mu         sync.RWMutex
 }
 
 // ShardedMap is a concurrent map split into numShards independent partitions.
@@ -29,7 +32,7 @@ func NewShardedMap() *ShardedMap {
 	for i := range sm.shards {
 		sm.shards[i].items = make(map[string]*CacheItem)
 		sm.shards[i].allocatedPtrs = make(map[string][]byte)
-		sm.shards[i].tombstones = make(map[string]struct{})
+		sm.shards[i].tombstones = make(map[string]uint64)
 	}
 	return sm
 }
@@ -49,31 +52,46 @@ func (sm *ShardedMap) Get(key string) (*CacheItem, bool) {
 	return item, ok
 }
 
-// Set stores an item by key (caller must handle old item cleanup before calling)
+// Set stores an item by key (caller must handle old item cleanup before calling).
+// The tombstone for the key (if any) is unconditionally cleared; callers that
+// need stale-write rejection (e.g. SetWithTimestamp) must consult TombstoneTS
+// before invoking Set.
 func (sm *ShardedMap) Set(key string, item *CacheItem, allocPtr []byte) {
 	s := sm.getShard(key)
 	s.mu.Lock()
 	s.items[key] = item
 	s.allocatedPtrs[key] = allocPtr
-	delete(s.tombstones, key) // clear tombstone on re-creation
+	delete(s.tombstones, key)
 	s.mu.Unlock()
 }
 
-// Delete removes an item by key. Returns the old item and its allocated pointer, or nil if not found.
-func (sm *ShardedMap) Delete(key string) (*CacheItem, []byte, bool) {
+// Delete removes an item by key and records a tombstone with the supplied
+// Lamport timestamp. The tombstone is recorded even when the item is not
+// present locally so that a stale in-flight SET (with an older timestamp)
+// cannot resurrect the key. Returns the old item and its allocated pointer,
+// or nil if the key was not present.
+//
+// Pass tombstoneTS=0 for local-only deletes (eviction, expiry, manual local
+// API calls without a clock); a zero-valued tombstone never blocks future SETs
+// since SetWithTimestamp only rejects when tombstoneTS >= incoming TS and
+// incoming TS > 0.
+func (sm *ShardedMap) Delete(key string, tombstoneTS uint64) (*CacheItem, []byte, bool) {
 	s := sm.getShard(key)
 	s.mu.Lock()
 	item, exists := s.items[key]
-	if !exists {
-		s.mu.Unlock()
-		return nil, nil, false
+	var ptr []byte
+	if exists {
+		ptr = s.allocatedPtrs[key]
+		delete(s.items, key)
+		delete(s.allocatedPtrs, key)
 	}
-	ptr := s.allocatedPtrs[key]
-	delete(s.items, key)
-	delete(s.allocatedPtrs, key)
-	s.tombstones[key] = struct{}{}
+	// Always advance the tombstone TS to the maximum observed value so that
+	// out-of-order DELETE replications never lower the tombstone watermark.
+	if existingTS, ok := s.tombstones[key]; !ok || tombstoneTS > existingTS {
+		s.tombstones[key] = tombstoneTS
+	}
 	s.mu.Unlock()
-	return item, ptr, true
+	return item, ptr, exists
 }
 
 // GetOldForReplace retrieves and deletes the old item for a key, used during SET to free old memory.
@@ -106,6 +124,17 @@ func (sm *ShardedMap) IsTombstoned(key string) bool {
 	_, ok := s.tombstones[key]
 	s.mu.RUnlock()
 	return ok
+}
+
+// TombstoneTS returns the Lamport timestamp of the tombstone for key, or 0 if
+// the key is not tombstoned. A non-zero tombstone TS suppresses any incoming
+// write whose Lamport timestamp is less than or equal to the tombstone TS.
+func (sm *ShardedMap) TombstoneTS(key string) uint64 {
+	s := sm.getShard(key)
+	s.mu.RLock()
+	ts := s.tombstones[key]
+	s.mu.RUnlock()
+	return ts
 }
 
 // ClearTombstone removes a tombstone for a key
@@ -172,7 +201,7 @@ func (sm *ShardedMap) Clear() {
 		sm.shards[i].mu.Lock()
 		sm.shards[i].items = make(map[string]*CacheItem)
 		sm.shards[i].allocatedPtrs = make(map[string][]byte)
-		sm.shards[i].tombstones = make(map[string]struct{})
+		sm.shards[i].tombstones = make(map[string]uint64)
 		sm.shards[i].mu.Unlock()
 	}
 }

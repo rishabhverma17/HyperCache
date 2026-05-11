@@ -130,6 +130,97 @@ func TestFilterAdd_PrePopulates(t *testing.T) {
 	}
 }
 
+// TestDeleteTombstone_BlocksStaleSet verifies that a DELETE recorded with a
+// Lamport timestamp creates a tombstone that suppresses any later-arriving
+// SET replication carrying an older timestamp. This guards against the race
+// where SET replication is delayed (e.g. async fire-and-forget) and arrives
+// at a peer after that peer has already processed the DELETE for the same
+// key — without the tombstone TS check the stale SET would resurrect the
+// deleted key. Regression for the Newman 5.2 "Verify 'user:2' gone from Node 1"
+// failure.
+func TestDeleteTombstone_BlocksStaleSet(t *testing.T) {
+	store := createTestStore(t)
+	defer store.Close()
+
+	// Simulate replication arriving in this order on a peer:
+	//   1) DELETE (TS=10) — owner deleted the key after some other writer set it
+	//   2) SET    (TS=5)  — stale in-flight replication of the original SET
+	if err := store.DeleteWithTimestamp("user:2", 10); err != nil {
+		t.Fatalf("DeleteWithTimestamp failed: %v", err)
+	}
+
+	applied, err := store.SetWithTimestamp(nil, "user:2", "Bob", "replication", time.Hour, 5)
+	if err != nil {
+		t.Fatalf("SetWithTimestamp returned error: %v", err)
+	}
+	if applied {
+		t.Fatal("stale SET (TS=5) must be rejected when a tombstone with TS=10 is present")
+	}
+
+	if _, err := store.Get("user:2"); err == nil {
+		t.Fatal("Get must report miss after DELETE; tombstone allowed resurrection")
+	}
+}
+
+// TestDeleteTombstone_RecordedEvenWhenAbsent verifies that DeleteWithTimestamp
+// records a tombstone even when the key is not present locally. This is the
+// case on a peer that has not yet received the original SET replication when
+// the DELETE replication arrives first.
+func TestDeleteTombstone_RecordedEvenWhenAbsent(t *testing.T) {
+	store := createTestStore(t)
+	defer store.Close()
+
+	// Key was never set locally — DeleteWithTimestamp must still tombstone.
+	if err := store.DeleteWithTimestamp("phantom", 7); err != nil {
+		t.Fatalf("DeleteWithTimestamp returned error for absent key: %v", err)
+	}
+
+	if !store.IsTombstoned("phantom") {
+		t.Fatal("expected tombstone to be recorded for absent key")
+	}
+
+	// A stale SET with TS <= 7 must be rejected.
+	applied, _ := store.SetWithTimestamp(nil, "phantom", "v", "replication", time.Hour, 7)
+	if applied {
+		t.Fatal("stale SET (TS=7) must be rejected; tombstone TS=7")
+	}
+
+	// A newer SET with TS > 7 must succeed and clear the tombstone.
+	applied, err := store.SetWithTimestamp(nil, "phantom", "v-new", "replication", time.Hour, 8)
+	if err != nil {
+		t.Fatalf("SetWithTimestamp returned error: %v", err)
+	}
+	if !applied {
+		t.Fatal("newer SET (TS=8) must overwrite tombstone (TS=7)")
+	}
+}
+
+// TestDelete_LocalDoesNotBlockFutureSets verifies that the lamport-less
+// Delete (used by eviction, expiry and local-only API calls) does not create
+// a tombstone that would block subsequent legitimate writes via the timestamp
+// path. Regression: an over-eager fix could accidentally block all writes.
+func TestDelete_LocalDoesNotBlockFutureSets(t *testing.T) {
+	store := createTestStore(t)
+	defer store.Close()
+
+	if err := store.Set("k", "v1", "test", time.Hour); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	if err := store.Delete("k"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	// A SetWithTimestamp(TS=1) must succeed because the local Delete used
+	// tombstone TS=0 (sentinel meaning "no causal block").
+	applied, err := store.SetWithTimestamp(nil, "k", "v2", "test", time.Hour, 1)
+	if err != nil {
+		t.Fatalf("SetWithTimestamp failed: %v", err)
+	}
+	if !applied {
+		t.Fatal("SET with TS=1 after local Delete should be applied (tombstone TS=0)")
+	}
+}
+
 // createTestStore creates a BasicStore with filter enabled for testing
 func createTestStore(t *testing.T) *BasicStore {
 	t.Helper()

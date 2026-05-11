@@ -313,10 +313,16 @@ func (s *BasicStore) Set(key string, value interface{}, sessionID string, ttl ti
 	return s.setWithContextInternal(nil, key, value, sessionID, ttl, 0)
 }
 
-// SetWithTimestamp writes a value only if the Lamport timestamp is newer than the existing one.
+// SetWithTimestamp writes a value only if the Lamport timestamp is strictly
+// newer than both the existing item's timestamp AND any tombstone for the
+// key. Honoring the tombstone prevents an in-flight stale SET replication
+// from resurrecting a key that was deleted by a later DELETE replication.
 func (s *BasicStore) SetWithTimestamp(ctx context.Context, key string, value interface{}, sessionID string, ttl time.Duration, lamportTS uint64) (bool, error) {
 	if existing, ok := s.data.Get(key); ok && existing.LamportTimestamp >= lamportTS {
 		return false, nil // Existing value is newer or equal — skip
+	}
+	if tombstoneTS := s.data.TombstoneTS(key); tombstoneTS > 0 && tombstoneTS >= lamportTS {
+		return false, nil // A later DELETE supersedes this stale SET — skip
 	}
 
 	err := s.setWithContextInternal(ctx, key, value, sessionID, ttl, lamportTS)
@@ -558,8 +564,30 @@ func (s *BasicStore) getInternal(ctx context.Context, key string) (interface{}, 
 	return value, nil
 }
 
-// Delete removes an item from the cache
+// Delete removes an item from the cache. The tombstone is recorded with
+// timestamp 0 (local-only delete) which never blocks subsequent SETs from
+// replication. Use DeleteWithTimestamp when the delete originates from a
+// distributed operation that has a Lamport timestamp.
 func (s *BasicStore) Delete(key string) error {
+	return s.deleteWithTimestamp(key, 0)
+}
+
+// DeleteWithTimestamp removes an item and records a tombstone tagged with the
+// supplied Lamport timestamp. The tombstone causes any later-arriving SET
+// replication with TS <= lamportTS to be rejected, preventing a stale write
+// from resurrecting a deleted key. Always returns nil when lamportTS > 0
+// (the tombstone is the meaningful side-effect; local presence is incidental).
+func (s *BasicStore) DeleteWithTimestamp(key string, lamportTS uint64) error {
+	err := s.deleteWithTimestamp(key, lamportTS)
+	if err != nil && lamportTS > 0 {
+		// Tombstone is recorded even when the key is absent locally; do not
+		// surface "key not found" to the replication caller.
+		return nil
+	}
+	return err
+}
+
+func (s *BasicStore) deleteWithTimestamp(key string, lamportTS uint64) error {
 	start := time.Now()
 	defer metrics.Global().RecordOp("del", start)
 
@@ -568,8 +596,10 @@ func (s *BasicStore) Delete(key string) error {
 		return fmt.Errorf("key cannot be empty")
 	}
 
-	item, allocPtr, existed := s.data.Delete(key)
+	item, allocPtr, existed := s.data.Delete(key, lamportTS)
 	if !existed {
+		// Tombstone has still been recorded by s.data.Delete() so that future
+		// stale writes can be rejected. Surface "not found" to local callers.
 		return fmt.Errorf("key not found: %s", key)
 	}
 

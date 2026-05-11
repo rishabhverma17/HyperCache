@@ -600,25 +600,33 @@ func (s *Server) handleDel(clientConn *ClientConn, cmd Command) ([]byte, error) 
 			}
 		}
 
-		err := store.Delete(key)
-		if err == nil {
-			deleted++
+		// Allocate a Lamport timestamp before performing the local delete so
+		// that the local tombstone and the replication payload share the same
+		// TS. This is what allows SetWithTimestamp on peers to suppress any
+		// stale in-flight SET replication for the same key.
+		lamportTS := uint64(0)
+		if s.coord != nil && s.coord.GetClock() != nil {
+			lamportTS = s.coord.GetClock().Tick()
+		}
 
-			// Replicate DELETE to hash-ring replicas (synchronous for consistency)
-			if s.coord != nil && s.nodeCommunicator != nil && s.coord.GetRouting() != nil {
-				lamportTS := uint64(0)
-				if s.coord.GetClock() != nil {
-					lamportTS = s.coord.GetClock().Tick()
+		err := store.DeleteWithTimestamp(key, lamportTS)
+		localExisted := err == nil
+		if localExisted {
+			deleted++
+		}
+
+		// Replicate DELETE to hash-ring replicas (synchronous for consistency)
+		// regardless of whether the key existed locally — peers may still hold
+		// it (or be about to receive a stale SET that needs to be suppressed).
+		if s.coord != nil && s.nodeCommunicator != nil && s.coord.GetRouting() != nil {
+			replicas := s.coord.GetRouting().GetReplicas(key, 3)
+			for _, replica := range replicas {
+				if replica == s.coord.GetLocalNodeID() {
+					continue
 				}
-				replicas := s.coord.GetRouting().GetReplicas(key, 3)
-				for _, replica := range replicas {
-					if replica == s.coord.GetLocalNodeID() {
-						continue
-					}
-					_ = s.nodeCommunicator.ReplicateEntry(
-						context.Background(), replica, key, nil, 0, lamportTS,
-					)
-				}
+				_ = s.nodeCommunicator.ReplicateEntry(
+					context.Background(), replica, key, nil, 0, lamportTS,
+				)
 			}
 		}
 	}

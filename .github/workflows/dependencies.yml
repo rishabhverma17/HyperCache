@@ -1,5 +1,22 @@
 name: Dependency Updates
 
+# This workflow updates Go module dependencies and opens a PR with the changes.
+#
+# REPOSITORY SETTINGS REQUIRED for the "Create Pull Request" step to succeed:
+#   Settings → Actions → General → Workflow permissions
+#     • "Read and write permissions"            ── ENABLED
+#     • "Allow GitHub Actions to create and       ── ENABLED  ← required by
+#        approve pull requests"                              peter-evans/create-pull-request
+#
+# If either setting is disabled, the workflow's "Create Pull Request" step
+# fails with: "GitHub Actions is not permitted to create or approve pull
+# requests" — this is a repo-level policy, not a workflow bug.
+#
+# Alternatively, replace ${{ secrets.GITHUB_TOKEN }} below with a fine-grained
+# Personal Access Token stored as a secret (e.g. secrets.PAT_DEPENDENCIES) that
+# has `contents:write` and `pull_requests:write`. A PAT also bypasses the
+# "1-approval required" branch protection that would otherwise block the bot.
+
 on:
   schedule:
     - cron: '0 0 * * 1'  # Weekly on Monday
@@ -56,7 +73,12 @@ jobs:
       run: go test -timeout=3m ./internal/... ./pkg/...
 
     - name: Create Pull Request
+      id: cpr
       if: steps.changes.outputs.has_changes == 'true'
+      # continue-on-error so that a failed PR creation (e.g. repo settings
+      # disallowing GitHub Actions to open PRs) surfaces a useful explanation
+      # in the next step instead of an opaque red ❌ on the workflow run.
+      continue-on-error: true
       uses: peter-evans/create-pull-request@v7
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
@@ -64,9 +86,42 @@ jobs:
         title: 'chore: update Go dependencies'
         body: |
           Automated dependency update.
-          
+
           - Updated Go modules to latest versions
           - Build and tests pass
         branch: chore/update-dependencies
         delete-branch: true
         sign-commits: false
+
+    - name: Report PR creation status
+      if: steps.changes.outputs.has_changes == 'true'
+      env:
+        OUTCOME: ${{ steps.cpr.outcome }}
+        PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
+        PR_URL: ${{ steps.cpr.outputs.pull-request-url }}
+      run: |
+        if [ "$OUTCOME" = "success" ] && [ -n "$PR_NUMBER" ]; then
+          echo "✅ Created/updated PR #$PR_NUMBER: $PR_URL"
+          exit 0
+        fi
+        cat <<'EOF' >&2
+        ❌ Failed to open the dependency-update pull request.
+
+        The most common causes (in order of likelihood):
+
+        1. Repo setting "Allow GitHub Actions to create and approve pull
+           requests" is disabled. Enable it under:
+             Settings → Actions → General → Workflow permissions
+
+        2. Branch protection on `main` requires signed commits or specific
+           reviewers. Either relax the rule for this bot or replace
+           secrets.GITHUB_TOKEN with a Personal Access Token (PAT) belonging
+           to a user permitted to bypass protection.
+
+        3. The branch `chore/update-dependencies` already exists with an open
+           PR that has merge conflicts. Close that PR or resolve the conflict
+           and re-run this workflow.
+
+        See workflow header comments for the full troubleshooting note.
+        EOF
+        exit 1

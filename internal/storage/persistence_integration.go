@@ -216,7 +216,7 @@ func (s *BasicStore) setInternal(key string, value interface{}, sessionID string
 
 // deleteInternal is like Delete but without persistence logging (used for recovery)
 func (s *BasicStore) deleteInternal(key string) error {
-	item, allocPtr, existed := s.data.Delete(key)
+	item, allocPtr, existed := s.data.Delete(key, 0)
 	if !existed {
 		return fmt.Errorf("key not found: %s", key)
 	}
